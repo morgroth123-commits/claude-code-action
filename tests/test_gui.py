@@ -628,6 +628,35 @@ class ChatMPDWindowAccessibilityTest(unittest.TestCase):
         )
         self.assertEqual(starts, [True])
 
+    def test_native_focus_order_matches_the_visual_workflow(self) -> None:
+        toolkit = FakeToolkit()
+        root = FakeRoot()
+        window = ChatMPDWindow(
+            root,
+            lambda unused_workspace, unused_task: successful_outcome(),
+            toolkit=toolkit,
+            choose_directory=lambda: "C:/project",
+        )
+
+        focusable = [
+            widget for widget in toolkit.widgets if widget.options.get("takefocus") is True
+        ]
+        self.assertEqual(
+            focusable,
+            [
+                window._theme_selector,
+                window._help_button,
+                window._choose_button,
+                window._workspace_entry,
+                window._task_box,
+                window._start_button,
+                window._timeline,
+                window._copy_button,
+                window._open_button,
+                window._new_button,
+            ],
+        )
+
     def test_validation_and_completion_focus_only_when_actionable(self) -> None:
         toolkit = FakeToolkit()
         root = FakeRoot()

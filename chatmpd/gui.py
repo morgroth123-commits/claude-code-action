@@ -252,8 +252,11 @@ class ChatMPDWindow:
 
         self._build_header()
         self._build_project_panel()
-        self._build_timeline()
+        self._main_panel = toolkit.Frame(self._shell, style="App.TFrame")
+        self._main_panel.columnconfigure(0, weight=1)
+        self._main_panel.rowconfigure(1, weight=1)
         self._build_composer()
+        self._build_timeline()
         self._build_footer()
         self._apply_theme("system", announce=False)
 
@@ -339,6 +342,13 @@ class ChatMPDWindow:
             justify="left",
             style="Body.TLabel",
         ).grid(row=0, column=0, sticky="w")
+        self._choose_button = toolkit.Button(
+            self._project_panel,
+            text="Choose project",
+            command=self._browse,
+            takefocus=True,
+            style="App.TButton",
+        )
         self._workspace_entry = toolkit.Entry(
             self._project_panel,
             textvariable=self._workspace,
@@ -347,13 +357,6 @@ class ChatMPDWindow:
             style="App.TEntry",
         )
         self._workspace_entry.grid(row=1, column=0, sticky="ew", pady=(12, 8))
-        self._choose_button = toolkit.Button(
-            self._project_panel,
-            text="Choose project",
-            command=self._browse,
-            takefocus=True,
-            style="App.TButton",
-        )
         self._choose_button.grid(row=2, column=0, sticky="ew")
         toolkit.Separator(self._project_panel, style="App.TSeparator").grid(
             row=3, column=0, sticky="ew", pady=14
@@ -373,9 +376,6 @@ class ChatMPDWindow:
 
     def _build_timeline(self) -> None:
         toolkit = self._toolkit
-        self._main_panel = toolkit.Frame(self._shell, style="App.TFrame")
-        self._main_panel.columnconfigure(0, weight=1)
-        self._main_panel.rowconfigure(1, weight=1)
         toolkit.Label(
             self._main_panel,
             text="Task activity",
