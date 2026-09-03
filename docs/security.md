@@ -1,197 +1,138 @@
-# Security
+# ChatMPD security model
 
-## Access Control
+ChatMPD combines a local language model, direct project-file edits, and isolated Python verification. The design reduces the authority given to model output, but it does not make model-generated changes inherently safe and does not claim perfect sandboxing or privacy.
 
-- **Repository Access**: The action can only be triggered by users with write access to the repository. This is checked for issue, pull request, comment, and review events, and for `workflow_run` events, where both the workflow actor and the actor that started the upstream run are checked. `workflow_dispatch`, `repository_dispatch`, and `schedule` events are not checked separately — GitHub itself requires write access to dispatch a workflow, and scheduled runs have no external actor.
-- **Bot User Control**: By default, GitHub Apps and bots cannot trigger this action for security reasons. Use the `allowed_bots` parameter to enable specific bots or all bots
-  - **⚠️ Allowed bots are not checked for repository permissions.** A bot that matches an entry does **not** need to be installed on your repository or have write access. On a **public repository**, external parties — including GitHub Apps created by anyone — may be able to trigger workflow events such as opening issues, commenting, or reviewing pull requests. If your workflow listens on those events and `allowed_bots` is set to `'*'`, any such App can invoke this action with a prompt it controls.
-  - Prefer an explicit list over `'*'`
-  - Only list App names you trust
-  - If you need `'*'`, scope workflow `permissions:` to the minimum required
-- **⚠️ Non-Write User Access (RISKY)**: The `allowed_non_write_users` parameter allows bypassing the write permission requirement. **This is a significant security risk and should only be used for workflows with extremely limited permissions** (e.g., issue labeling workflows that only have `issues: write` permission). This feature:
-  - Only works when `github_token` is provided as input (not with GitHub App authentication)
-  - Accepts either a comma-separated list of specific usernames or `*` to allow all users
-  - **Should be used with extreme caution** as it bypasses the primary security mechanism of this action
-  - Is designed for automation workflows where user permissions are already restricted by the workflow's permission scope
-  - When set, Claude does a best-effort scrub of Anthropic, cloud, and GitHub Actions secrets from subprocess environments. On Linux runners with bubblewrap available, subprocesses additionally run with PID-namespace isolation. This reduces but does not eliminate prompt injection risk — keep workflow permissions minimal and validate all outputs. Set `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: 0` in your workflow or job `env:` block to opt out.
-  - Optionally set `CLAUDE_CODE_SCRIPT_CAPS` in your workflow `env:` block to limit how many times Claude can call specific scripts per run. Value is JSON: `{"script-name.sh": maxCalls}`. Example: `CLAUDE_CODE_SCRIPT_CAPS: '{"edit-issue-labels.sh":2}'` allows at most 2 calls to `edit-issue-labels.sh`. Useful for write-capable helper scripts.
-  - When using `allowed_non_write_users`, always pass `github_token: ${{ secrets.GITHUB_TOKEN }}`. The auto-generated workflow token is scoped to the job's declared permissions and expires when the job completes. **Do not use a personal access token** — a static token does not rotate between runs and could be partially or fully recovered over time via prompt injection. Restricting allowed tools via `claude_args` reduces the rate of recovery but may not eliminate the risk. We recommend restricting allowed tools (e.g. `claude_args: '--allowedTools "Bash(gh issue view:*)"'`) to the minimum required when using `allowed_non_write_users`.
-- **Token Permissions**: The GitHub app receives only a short-lived token scoped specifically to the repository it's operating in
-- **No Cross-Repository Access**: Each action invocation is limited to the repository where it was triggered
-- **Limited Scope**: The token cannot access other repositories or perform actions beyond the configured permissions
+For private vulnerability reporting, see the root [security policy](../SECURITY.md).
 
-## Using this action with `pull_request_target` or `workflow_run`
+## Plain-language summary
 
-For `workflow_run` events, the action checks the repository access of the actor that started the upstream run (for example, the author of the fork pull request that triggered your CI workflow) in addition to the workflow actor. If that actor does not have write access, the action stops before running Claude. To run on `workflow_run` events downstream of pull requests from contributors without write access, add those users to `allowed_non_write_users` and pass `github_token: ${{ secrets.GITHUB_TOKEN }}` — see the notes on that input above and keep the workflow's permissions minimal.
+- ChatMPD sends model requests only to a validated loopback llama.cpp URL. There is no cloud-model fallback, paid API, API key, per-call fee, or vendor quota in the current code.
+- The agent is not given a terminal. It receives four tools: bounded listing, bounded UTF-8 reading, atomic UTF-8 writing, and one exact approved Python verification command.
+- Project execution happens on a filtered copy inside the WSL distro named `Ubuntu`, with bubblewrap networking unshared and capabilities dropped. The live Windows project is not mounted into that command environment.
+- `.git`, `.chatmpd`, common secret directories, known credential filenames, environment files, and private-key/certificate formats are denied or omitted at relevant boundaries.
+- ChatMPD can still read and change ordinary source files with the current Windows user's authority. A secret embedded in a normal-looking source file cannot be reliably identified by a path filter.
+- Run records are local and avoid raw read contents and command output, but they do store task text, summaries, file paths, and error/verification metadata. Do not put secrets into task text.
+- Local Git context is read-only. ChatMPD does not fetch, push, commit, create branches, open pull requests, or mutate a remote.
 
-`pull_request_target` and `workflow_run` execute with the **base repository's secrets**. If your workflow checks out the PR head (`ref: ${{ github.event.pull_request.head.sha }}` for `pull_request_target`, `ref: ${{ github.event.workflow_run.head_sha }}` for `workflow_run`) into `$GITHUB_WORKSPACE` before this action, the action and Claude run with that checkout as the working directory.
+## Assets and trust boundaries
 
-**Do not check out an untrusted ref into the workspace root before this action.** Use one of these patterns instead:
+| Asset | Main control | Residual risk |
+| --- | --- | --- |
+| Selected project files | Workspace-relative canonical path checks, protected components, atomic writes, 256 KiB limit, pre-edit backup. | The Windows process has the owner's normal access; permitted files can be changed incorrectly. |
+| Credentials and repository state | Sensitive names/extensions and secret directories are blocked; `.git` and `.chatmpd` are protected; scans and snapshots filter them. | Secrets in ordinary source, unusual filenames, generated output, task text, or error text may not be recognized. |
+| Verification execution | Exact argv allowlist, no project shell, filtered copy, WSL Ubuntu, bubblewrap namespaces, no network namespace, cleared environment, dropped capabilities, time/output limits. | WSL/kernel/distro/bubblewrap bugs or host compromise remain possible; resource exhaustion is bounded but not eliminated. |
+| Local model traffic | Plain HTTP restricted to loopback syntax, proxy bypass, endpoint diagnostics/identity alias, exclusive per-task endpoint ownership, request/response shape and size checks. | Loopback has no TLS or authentication; another local process can observe, impersonate, or call a local server subject to OS controls. |
+| Model and server files | Explicit local discovery and separate installation. | A tampered binary or model has not been made trustworthy merely by being local. |
+| Local Git context | Resolved Git executable, noninteractive read-only subcommands, bounded output, credential-free origin parsing, sensitive diff filtering. | Git itself and repository configuration remain local trust dependencies; sanitizers cannot understand every data format. |
+| Recovery records | Per-run directory protected from model tools and excluded from snapshots; raw reads/command output replaced by metadata and hashes. | Task text, summary, paths, tool-error messages, and timing/status metadata persist until the owner deletes them. |
+| Game performance | ESO detection selects CPU-only, one-thread, idle-priority inference and unloads an owned server after the task. | WSL, snapshot I/O, memory use, and CPU inference can still affect the game. |
 
-```yaml
-# Preferred — check out the base ref (default).
-- uses: actions/checkout@v6 # no `ref:` → base branch
-- uses: anthropics/claude-code-action@v1
+## Project discovery and protected paths
+
+Before model use, ChatMPD scans a bounded inventory. It skips symbolic links and junctions so they cannot redirect discovery outside the selected folder. The project manifest and WSL snapshot exclude internal state, environments, common caches/build outputs, and these common secret locations:
+
+```text
+.aws  .azure  .ssh  .secrets  secret  secrets
 ```
 
-```yaml
-# If you need the PR's files locally — check out the base ref at the workspace
-# root (this action expects a git repo there), then check out the head ref into
-# a subdirectory and pass it via --add-dir.
-- uses: actions/checkout@v6 # no `ref:` → base branch at workspace root
-- uses: actions/checkout@v6
-  with:
-    # For workflow_run use: ${{ github.event.workflow_run.head_sha }}
-    ref: ${{ github.event.pull_request.head.sha }}
-    path: pr-head
-- uses: anthropics/claude-code-action@v1
-  with:
-    claude_args: "--add-dir pr-head"
+Direct agent path access also protects those directory components plus:
+
+```text
+.git  .chatmpd
 ```
 
-This is general guidance for these event types — see [GitHub's documentation](https://securitylab.github.com/research/github-actions-preventing-pwn-requests/).
+Known sensitive files include `.env` and `.env.*` (except `.env.example`), `.netrc`, `.npmrc`, `.pypirc`, common identity-key and service-account filenames, and `.key`, `.pem`, `.p12`, and `.pfx` files. Windows reserved device names, trailing-dot/space aliases, invalid characters, absolute paths, parent traversal, links, junctions, and paths resolving outside the workspace are rejected.
 
-### `claude-code-action` vs `claude-code-base-action`
+These rules protect common high-risk cases; they are not content inspection. For example, `src/settings.py` or `notes.txt` could contain a token and still look like an ordinary source file. Keep secrets out of the selected project when practical, use environment/credential stores, and review what a task requires before starting it.
 
-`claude-code-base-action` is a lower-level building block that installs and runs Claude Code with the inputs you provide. It does not perform actor permission checks or restore project configuration from the base ref. If you need those behaviors, use this action (`claude-code-action`). See the [base-action README](../base-action/README.md#trust-model) for details.
+## Local model and loopback endpoint
 
-## Pull Request Creation
+The runtime accepts only a plain-HTTP URL whose hostname is `127.0.0.1`, `localhost`, or `::1`, with a port and no credentials, query, or fragment. The default is `http://127.0.0.1:8080`. The provider explicitly disables proxy handling.
 
-In its default configuration, **Claude does not create pull requests automatically** when responding to `@claude` mentions. Instead:
+ChatMPD probes `/health` and `/v1/models` for endpoint diagnostics and the alias `chatmpd-local`. A new runtime refuses every already-healthy endpoint, including a service with that alias, rather than borrowing or terminating a process it does not own. If ChatMPD starts llama.cpp, it supplies the local model path, binds to `127.0.0.1`, disables the web UI, limits parallelism, and keeps a handle so it can terminate that owned process at task exit.
 
-- Claude commits code changes to a new branch
-- Claude provides a **link to the GitHub PR creation page** in its response
-- **The user must click the link and create the PR themselves**, ensuring human oversight before any code is proposed for merging
+Loopback is a routing restriction, not an authentication or encryption mechanism. Other processes running as the user may be able to connect to the port. Host malware or a malicious local service remains outside ChatMPD's protection. Use trusted llama.cpp binaries and model files, keep Windows patched, and do not expose or forward port `8080`.
 
-This design ensures that users retain full control over what pull requests are created and can review the changes before initiating the PR workflow.
+Game detection also follows a fail-safe preference: if the `eso64.exe` detector cannot complete, ChatMPD chooses the lower-impact CPU-safe llama.cpp settings rather than assuming GPU-auto mode is safe.
 
-## ⚠️ Prompt Injection Risks
+ChatMPD itself does not include cloud inference or telemetry in the task path. That is narrower than a promise that no component on the computer ever uses a network: Windows, WSL, Ubuntu, package managers, security software, Git helpers, or a separately installed binary may have their own behavior. Verification specifically unshares its network namespace, but host components remain independently administered.
 
-**Beware of potential hidden markdown when tagging Claude on untrusted content.** External contributors may include hidden instructions through HTML comments, invisible characters, hidden attributes, or other techniques. The action sanitizes content by stripping HTML comments, invisible characters, markdown image alt text, hidden HTML attributes, and HTML entities, but new bypass techniques may emerge. We recommend reviewing the raw content of all input coming from external contributors before allowing Claude to process it.
+## Model authority and command policy
 
-On public repos, you can also use `include_comments_by_actor` to allowlist which users' comments are passed to Claude, reducing exposure to untrusted input. Use `exclude_comments_by_actor` to filter out noisy bot comments (e.g., `dependabot[bot]`, `renovate[bot]`). If an actor matches both lists, exclusion takes priority. See [Usage](./usage.md) for details.
+The local model proposes actions; it does not receive direct Python, PowerShell, Command Prompt, Bash, WSL, Git, or network tools. Tool schemas allow:
 
-## GitHub App Permissions
+- `list_files`
+- `read_file`
+- `write_file`
+- `run_command`
 
-The [Claude Code GitHub app](https://github.com/apps/claude) requests the following permissions:
+The service populates the command policy with one exact Python argv chosen before the model loop. `PermissionPolicy` compares the full argument sequence, so an added flag, changed path, shell metacharacter, or different executable is denied. `subprocess`/WSL launch APIs receive argument lists with shell execution disabled around the approved project command.
 
-### Currently Used Permissions
+Exact allowlisting does not make the code under test harmless. Python `unittest` discovery imports and executes project-supplied test modules, and those tests can import application code. That untrusted project execution receives access to the filtered `/work` copy and can consume resources, but it is kept away from the live Windows project and host network by the sandbox design. `compileall` compiles source without intentionally running module top-level code, but it still processes untrusted files through the Python toolchain.
 
-- **Contents** (Read & Write): For reading repository files and creating branches
-- **Pull Requests** (Read & Write): For reading PR data and creating/updating pull requests
-- **Issues** (Read & Write): For reading issue data and updating issue comments
+Success is gated independently of the model's wording: each required command must have passed after the most recent write. The engine allows at most 50 turns, while the model adapter requests a single tool call per turn. These rules reduce prompt-injection authority but do not ensure that the allowed edit itself is correct or that the selected check has adequate test coverage.
 
-### Permissions for Future Features
+## WSL Ubuntu and bubblewrap verification
 
-The following permissions are requested but not yet actively used. These will enable planned features in future releases:
+ChatMPD creates an in-memory temporary tar snapshot of safe regular files. The live workspace, `.git`, `.chatmpd`, secrets, caches, virtual environments, and links are not mounted into bubblewrap. The snapshot is extracted under a random `/tmp/chatmpd-sandbox-*` directory inside WSL and deleted by the guest cleanup handler.
 
-- **Discussions** (Read & Write): For interaction with GitHub Discussions
-- **Actions** (Read): For accessing workflow run data and logs
-- **Checks** (Read): For reading check run results
-- **Workflows** (Read & Write): For triggering and managing GitHub Actions workflows
+The bubblewrap invocation uses:
 
-## Commit Signing
+- new user, PID, network, IPC, and UTS namespaces
+- `--cap-drop ALL`
+- read-only `/usr`, `/lib`, and `/lib64`
+- a minimal `/proc` and `/dev`
+- empty `/etc`, `/home`, and `/run`
+- temporary `/tmp`
+- only the extracted project copy writable at `/work`
+- a cleared environment with fixed `HOME`, locale, `PATH`, Python cache, and temporary-directory values
+- a new session, parent-death behavior, and an inner timeout
 
-By default, commits made by Claude are unsigned. You can enable commit signing using one of two methods:
+Windows applies a second timeout and attempts process-tree termination and guest-root cleanup if needed. Snapshot file count/size, command duration, command-argument length, and captured output are bounded.
 
-### Option 1: GitHub API Commit Signing (use_commit_signing)
+This is meaningful defense in depth, not a formal security proof. The WSL virtual machine/kernel integration, Ubuntu userland, bubblewrap, tar handling, Python interpreter, Windows host, and hardware remain in the trusted computing base. A denial-of-service, kernel escape, implementation flaw, side channel, or resource spike may still be possible.
 
-This uses GitHub's API to create commits, which automatically signs them as verified from the GitHub App:
+## Git behavior
 
-```yaml
-- uses: anthropics/claude-code-action@main
-  with:
-    use_commit_signing: true
-```
+Git context is optional. When Git is available, ChatMPD resolves an executable from an absolute `PATH` entry and runs local read-only commands to identify the root/branch/origin name and collect status/diff. If the owner selected a subdirectory of a larger repository, status and diff receive a top-anchored literal pathspec for only that selected subtree; a repository-root selection includes the whole repository. Credential prompts and optional locks are disabled; diff helpers and text conversion are disabled; Windows launches request no visible console. Origin parsing keeps only safe owner/repository components, not credentials or the full remote URL.
 
-This is the simplest option and requires no additional setup. However, because it uses the GitHub API instead of git CLI, it cannot perform complex git operations like rebasing, cherry-picking, or interactive history manipulation.
+ChatMPD has no product tool for `fetch`, `pull`, `push`, `commit`, `checkout`, `switch`, branch deletion/creation, tag mutation, issue mutation, or pull-request creation. The WSL command allowlist also excludes Git. A human may use Git separately for backup and review.
 
-### Option 2: SSH Signing Key (ssh_signing_key)
+## Records, backups, and privacy
 
-This uses an SSH key to sign commits via git CLI. Use this option when you need both signed commits AND standard git operations (rebasing, cherry-picking, etc.):
+Every engine attempt creates `.chatmpd/runs/<run-id>/` before the model loop:
 
-```yaml
-- uses: anthropics/claude-code-action@main
-  with:
-    ssh_signing_key: ${{ secrets.SSH_SIGNING_KEY }}
-    bot_id: "YOUR_GITHUB_USER_ID"
-    bot_name: "YOUR_GITHUB_USERNAME"
-```
+- `run.json` stores the task, final status/summary, changed-file paths, required-check argv/exit code/sequence, byte counts, hashes, and event count.
+- `events.jsonl` stores timestamps, event types, plan steps, permission decisions, tool names, file paths/byte counts/hashes, write metadata, and tool-failure messages.
+- `backups/` stores an original existing file before its first replacement in that run, up to 256 KiB.
 
-Commits will show as verified and attributed to the GitHub account that owns the signing key.
+The persisted version of a successful `read_file` event omits content. Persisted command events omit stdout/stderr and store size/hash metadata. Model chat messages are not written as a transcript. However:
 
-**Setup steps:**
+- task text and final summary are stored verbatim
+- an error message can contain a path or bounded diagnostic detail
+- filenames themselves may be sensitive
+- a backup contains the complete original file by design
+- the llama.cpp server log persists separately at `%LOCALAPPDATA%\ChatMPD\runtime\llama-server.log`
 
-1. Generate an SSH key pair for signing:
+Treat the project and its `.chatmpd` folder as private local data. Limit filesystem access using normal Windows accounts, do not sync or commit `.chatmpd`, inspect logs before sharing them, and delete records only after you no longer need recovery/audit information.
 
-   ```bash
-   ssh-keygen -t ed25519 -f ~/.ssh/signing_key -N "" -C "commit signing key"
-   ```
+## Owner checklist
 
-2. Add the **public key** to your GitHub account:
+Before a task:
 
-   - Go to GitHub → Settings → SSH and GPG keys
-   - Click "New SSH key"
-   - Select **Key type: Signing Key** (important)
-   - Paste the contents of `~/.ssh/signing_key.pub`
+1. Use a trusted copy of ChatMPD, llama.cpp, bubblewrap/Ubuntu packages, and the Qwen model.
+2. Keep Windows and WSL maintained.
+3. Use a backed-up project or review a clean local Git baseline.
+4. Remove credentials from ordinary project files where possible.
+5. Do not include credentials, private customer data, or unrelated personal information in task text.
+6. Close any unrelated service using port `8080` rather than asking ChatMPD to take it over.
 
-3. Add the **private key** to your repository secrets:
+After a task:
 
-   - Go to your repo → Settings → Secrets and variables → Actions
-   - Create a new secret named `SSH_SIGNING_KEY`
-   - Paste the contents of `~/.ssh/signing_key`
+1. Review the changed-file list and actual diff.
+2. Confirm the selected verification command was appropriate for the project.
+3. Treat a passing `compileall` check as syntax validation only, not behavioral correctness.
+4. Restore an original from the run backup or local Git if the edit is unwanted.
+5. Keep or remove run records according to your recovery and privacy needs.
 
-4. Get your GitHub user ID:
-
-   ```bash
-   gh api users/YOUR_USERNAME --jq '.id'
-   ```
-
-5. Update your workflow with `bot_id` and `bot_name` matching the account where you added the signing key.
-
-**Note:** If both `ssh_signing_key` and `use_commit_signing` are provided, `ssh_signing_key` takes precedence.
-
-## ⚠️ Authentication Protection
-
-**CRITICAL: Never hardcode your Anthropic API key or OAuth token in workflow files!**
-
-Your authentication credentials must always be stored in GitHub secrets to prevent unauthorized access:
-
-```yaml
-# CORRECT ✅
-anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-# OR
-claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
-# NEVER DO THIS ❌
-anthropic_api_key: "sk-ant-api03-..." # Exposed and vulnerable!
-claude_code_oauth_token: "oauth_token_..." # Exposed and vulnerable!
-```
-
-## ⚠️ Full Output Security Warning
-
-The `show_full_output` option is **disabled by default** for security reasons. When enabled, it outputs ALL Claude Code messages including:
-
-- Full outputs from tool executions (e.g., `ps`, `env`, file reads)
-- API responses that may contain tokens or credentials
-- File contents that may include secrets
-- Command outputs that may expose sensitive system information
-
-**These logs are publicly visible in GitHub Actions for public repositories!**
-
-### Automatic Enabling in Debug Mode
-
-Full output is **automatically enabled** when GitHub Actions debug mode is active (when `ACTIONS_STEP_DEBUG` secret is set to `true`). This helps with debugging but carries the same security risks.
-
-### When to Enable Full Output
-
-Only enable `show_full_output: true` or GitHub Actions debug mode when:
-
-- Working in a private repository with controlled access
-- Debugging issues in a non-production environment
-- You have verified no secrets will be exposed in the output
-- You understand the security implications
-
-### Recommended Practice
-
-For debugging, prefer using `show_full_output: false` (the default) and rely on Claude Code's sanitized output, which shows only essential information like errors and completion status without exposing sensitive data.
+See [Troubleshooting and recovery](troubleshooting.md) for concrete steps.

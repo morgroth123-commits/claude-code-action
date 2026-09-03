@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ChatMPD"
+version = "0.1.0"
+description = "A free, local-first coding agent with isolated verification"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = []
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development",
+]
+
+[project.scripts]
+chatmpd = "chatmpd.app:main"
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6,<7"]
+
+[tool.setuptools.packages.find]
+include = ["chatmpd*"]

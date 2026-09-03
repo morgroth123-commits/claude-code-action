@@ -2,3 +2,15 @@
 node_modules
 
 **/.claude/settings.local.json
+
+# ChatMPD local Python/build/runtime artifacts
+.venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+!ChatMPD.spec
+.chatmpd/
+demo-output/
+*.log
