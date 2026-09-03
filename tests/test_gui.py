@@ -4,6 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from queue import Queue
+from tempfile import TemporaryDirectory
 from threading import Event, get_ident
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -14,6 +15,12 @@ from chatmpd.gui import (
     UiSnapshot,
     format_task_outcome,
     launch_gui,
+)
+from chatmpd.presentation import (
+    HELP_TEXT,
+    format_task_presentation,
+    palette_for,
+    present_task_outcome,
 )
 
 
@@ -57,6 +64,7 @@ class FakeWidget:
         self.bindings: dict[str, object] = {}
         self.tags: dict[str, dict[str, object]] = {}
         self.see_calls: list[object] = []
+        self.focus_calls = 0
         self.start_calls = 0
         self.stop_calls = 0
         self.visible = True
@@ -116,6 +124,7 @@ class FakeWidget:
         self.bindings[sequence] = callback
 
     def focus_set(self) -> None:
+        self.focus_calls += 1
         self.toolkit.focused_widget = self
         if self.toolkit.root is not None:
             self.toolkit.root.focused_widget = self
@@ -517,7 +526,7 @@ class ChatMPDControllerTest(unittest.TestCase):
         self.assertTrue(snapshots[-1].start_enabled)
 
 
-class ChatMPDWindowTest(unittest.TestCase):
+class ChatMPDWindowConstructionTest(unittest.TestCase):
     def test_window_closes_when_idle_but_waits_for_runtime_cleanup_when_busy(self) -> None:
         toolkit = FakeToolkit()
         root = FakeRoot()
@@ -536,6 +545,7 @@ class ChatMPDWindowTest(unittest.TestCase):
             choose_directory=lambda: "C:/project",
         )
         window._workspace.set("C:/project")
+        window._clear_placeholder()
         window._task_box.insert("1.0", "Repair the calculator")
         window._start()
         self.assertTrue(runner_started.wait(1))
@@ -578,6 +588,84 @@ class ChatMPDWindowTest(unittest.TestCase):
         self.assertEqual(workspace_entry.options["textvariable"].get(), "C:/project")
         self.assertEqual(window._workspace.get(), "C:/project")
 
+
+class ChatMPDWindowAccessibilityTest(unittest.TestCase):
+    def test_binds_documented_shortcuts_and_routes_composer_focus(self) -> None:
+        toolkit = FakeToolkit()
+        root = FakeRoot()
+        window = ChatMPDWindow(
+            root,
+            lambda unused_workspace, unused_task: successful_outcome(),
+            toolkit=toolkit,
+            choose_directory=lambda: "C:/project",
+        )
+
+        expected = {
+            "<Control-o>",
+            "<Control-l>",
+            "<Control-Return>",
+            "<Control-Shift-C>",
+            "<Control-n>",
+            "<Control-plus>",
+            "<Control-equal>",
+            "<Control-minus>",
+            "<Control-0>",
+            "<F1>",
+            "<Escape>",
+        }
+        self.assertTrue(expected.issubset(root.bindings))
+        self.assertNotIn("<Return>", root.bindings)
+
+        self.assertEqual(root.bindings["<Control-l>"](SimpleNamespace()), "break")
+        self.assertIs(root.focus_get(), window._task_box)
+
+        starts: list[bool] = []
+        window._start = lambda: starts.append(True)
+        self.assertEqual(
+            root.bindings["<Control-Return>"](SimpleNamespace()),
+            "break",
+        )
+        self.assertEqual(starts, [True])
+
+    def test_validation_and_completion_focus_only_when_actionable(self) -> None:
+        toolkit = FakeToolkit()
+        root = FakeRoot()
+        scheduled: Queue[object] = Queue()
+        window = ChatMPDWindow(
+            root,
+            lambda unused_workspace, unused_task: successful_outcome(),
+            toolkit=toolkit,
+            choose_directory=lambda: "C:/project",
+        )
+        window._controller._schedule = scheduled.put
+
+        self.assertFalse(window._controller.start("", "Repair the calculator"))
+        self.assertIs(root.focus_get(), window._choose_button)
+
+        self.assertFalse(window._controller.start("C:/project", " \n "))
+        self.assertIs(root.focus_get(), window._task_box)
+
+        self.assertTrue(window._controller.start("C:/project", "Repair the calculator"))
+        scheduled.get(timeout=2)()
+        self.assertIs(root.focus_get(), window._timeline)
+        self.assertEqual(window._timeline.focus_calls, 1)
+
+        window._render(
+            UiSnapshot(
+                False,
+                "Task finished successfully.",
+                "success",
+                window._current_result,
+                True,
+            )
+        )
+        self.assertEqual(window._timeline.focus_calls, 1)
+
+        window._status.set("A background note changed.")
+        self.assertEqual(window._timeline.focus_calls, 1)
+
+
+class ChatMPDWindowTest(unittest.TestCase):
     def test_renders_honest_working_and_structured_completed_timeline(self) -> None:
         toolkit = FakeToolkit()
         root = FakeRoot()
@@ -598,6 +686,7 @@ class ChatMPDWindowTest(unittest.TestCase):
             choose_directory=lambda: "C:/project",
         )
         window._workspace.set("C:/project")
+        window._clear_placeholder()
         window._task_box.insert("1.0", "Repair the calculator")
         start_button = toolkit.find("Button", "Start task")
         start_button.invoke()
@@ -643,6 +732,215 @@ class ChatMPDWindowTest(unittest.TestCase):
             "ChatMPD — Local project assistant",
         )
         toolkit.find("Button", "Start task")
+
+
+class ChatMPDWindowAppearanceTest(unittest.TestCase):
+    def test_supports_system_light_and_dark_with_palette_owned_text_colors(self) -> None:
+        toolkit = FakeToolkit()
+        root = FakeRoot()
+        window = ChatMPDWindow(
+            root,
+            lambda unused_workspace, unused_task: successful_outcome(),
+            toolkit=toolkit,
+            choose_directory=lambda: "C:/project",
+        )
+
+        selector = toolkit.find("Combobox")
+        self.assertEqual(selector.options["values"], ("System", "Light", "Dark"))
+        for name in ("system", "light", "dark"):
+            window._apply_theme(name)
+            self.assertEqual(window._theme_name, name)
+            palette = palette_for(name)
+            colors = {
+                palette.canvas,
+                palette.surface,
+                palette.elevated,
+                palette.border,
+                palette.text,
+                palette.muted_text,
+                palette.accent,
+                palette.accent_text,
+                palette.focus,
+                palette.success,
+                palette.warning,
+                palette.error,
+            }
+            for widget in (window._task_box, window._timeline):
+                self.assertIn(widget.options["background"], colors)
+                self.assertIn(widget.options["foreground"], colors)
+                self.assertIn(widget.options["insertbackground"], colors)
+                self.assertIn(widget.options["selectbackground"], colors)
+                self.assertIn(widget.options["selectforeground"], colors)
+
+        window._apply_theme("not-a-theme")
+        self.assertEqual(window._theme_name, "system")
+        self.assertEqual(window._theme.get(), "System")
+
+    def test_text_scaling_uses_bounded_steps_and_reset(self) -> None:
+        toolkit = FakeToolkit()
+        root = FakeRoot()
+        base_scaling = root.tk.scaling
+        window = ChatMPDWindow(
+            root,
+            lambda unused_workspace, unused_task: successful_outcome(),
+            toolkit=toolkit,
+            choose_directory=lambda: "C:/project",
+        )
+
+        self.assertEqual(window._text_scale, 100)
+        self.assertEqual(root.bindings["<Control-plus>"](SimpleNamespace()), "break")
+        self.assertEqual(window._text_scale, 110)
+        self.assertAlmostEqual(root.tk.scaling, base_scaling * 1.1)
+        for unused in range(10):
+            root.bindings["<Control-plus>"](SimpleNamespace())
+        self.assertEqual(window._text_scale, 160)
+        for unused in range(10):
+            root.bindings["<Control-minus>"](SimpleNamespace())
+        self.assertEqual(window._text_scale, 90)
+        self.assertEqual(root.bindings["<Control-0>"](SimpleNamespace()), "break")
+        self.assertEqual(window._text_scale, 100)
+        self.assertAlmostEqual(root.tk.scaling, base_scaling)
+
+
+class ChatMPDWindowActionTest(unittest.TestCase):
+    def test_copy_open_help_and_new_task_are_real_safe_actions(self) -> None:
+        with TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_folder = project / ".chatmpd" / "runs" / "1"
+            run_folder.mkdir(parents=True)
+            outcome = successful_outcome()
+            outcome.result.state_file = run_folder / "run.json"
+            result = present_task_outcome(outcome)
+            opened: list[Path] = []
+            help_calls: list[tuple[str, str]] = []
+            toolkit = FakeToolkit()
+            root = FakeRoot()
+            window = ChatMPDWindow(
+                root,
+                lambda unused_workspace, unused_task: outcome,
+                toolkit=toolkit,
+                choose_directory=lambda: str(project),
+                open_directory=opened.append,
+                present_help=lambda title, message: help_calls.append((title, message)),
+            )
+            window._workspace.set(str(project))
+            window._submitted_task = "Repair the calculator"
+            window._render(
+                UiSnapshot(
+                    False,
+                    "Task finished successfully.",
+                    "success",
+                    result,
+                    True,
+                )
+            )
+
+            toolkit.find("Button", "Copy result").invoke()
+            self.assertEqual(root.clipboard, format_task_presentation(result))
+            toolkit.find("Button", "Open run folder").invoke()
+            self.assertEqual(opened, [run_folder.resolve()])
+            toolkit.find("Button", "Help").invoke()
+            self.assertEqual(help_calls, [("ChatMPD Help", HELP_TEXT)])
+
+            window._task_box.delete("1.0", "end")
+            window._task_box.insert("1.0", "A follow-up task")
+            toolkit.find("Button", "New task").invoke()
+            self.assertEqual(window._workspace.get(), str(project))
+            self.assertEqual(window._task_box.get("1.0", "end-1c"), "")
+            self.assertEqual(window._timeline.text, "")
+            self.assertIs(root.focus_get(), window._task_box)
+
+    def test_rejects_unsafe_or_missing_run_paths_without_opening(self) -> None:
+        with TemporaryDirectory() as temporary:
+            project = Path(temporary) / "project"
+            project.mkdir()
+            opened: list[Path] = []
+            toolkit = FakeToolkit()
+            root = FakeRoot()
+            window = ChatMPDWindow(
+                root,
+                lambda unused_workspace, unused_task: successful_outcome(),
+                toolkit=toolkit,
+                choose_directory=lambda: str(project),
+                open_directory=opened.append,
+            )
+            window._workspace.set(str(project))
+            outcome = successful_outcome()
+            outcome.result.state_file = project.parent / "outside" / "run.json"
+            window._current_result = present_task_outcome(outcome)
+
+            self.assertEqual(window._open_run_folder(), "break")
+            self.assertEqual(opened, [])
+            self.assertTrue(window._status.get().startswith("Needs attention:"))
+            self.assertLessEqual(len(window._status.get()), 340)
+
+            window._current_result = None
+            self.assertEqual(window._open_run_folder(), "break")
+            self.assertEqual(opened, [])
+            self.assertTrue(window._status.get().startswith("Needs attention:"))
+
+    def test_desktop_action_errors_are_nonfatal_and_bounded(self) -> None:
+        with TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_folder = project / ".chatmpd" / "runs" / "1"
+            run_folder.mkdir(parents=True)
+            outcome = successful_outcome()
+            outcome.result.state_file = run_folder / "run.json"
+            toolkit = FakeToolkit()
+            root = FakeRoot()
+
+            def fail_open(unused_path: Path) -> None:
+                raise OSError("desktop opener failed\n" + "x" * 1_000)
+
+            window = ChatMPDWindow(
+                root,
+                lambda unused_workspace, unused_task: outcome,
+                toolkit=toolkit,
+                choose_directory=lambda: str(project),
+                open_directory=fail_open,
+            )
+            window._workspace.set(str(project))
+            window._current_result = present_task_outcome(outcome)
+
+            def fail_clipboard(unused_text: str) -> None:
+                raise RuntimeError("clipboard unavailable")
+
+            root.clipboard_append = fail_clipboard
+            self.assertEqual(window._copy_result(), "break")
+            self.assertTrue(window._status.get().startswith("Needs attention:"))
+            self.assertEqual(window._open_run_folder(), "break")
+            self.assertTrue(window._status.get().startswith("Needs attention:"))
+            self.assertLessEqual(len(window._status.get()), 340)
+
+    def test_placeholder_is_never_submitted_and_counter_uses_utf8_bytes(self) -> None:
+        calls: list[str] = []
+        toolkit = FakeToolkit()
+        root = FakeRoot()
+        window = ChatMPDWindow(
+            root,
+            lambda unused_workspace, task: calls.append(task) or successful_outcome(),
+            toolkit=toolkit,
+            choose_directory=lambda: "C:/project",
+        )
+        window._workspace.set("C:/project")
+
+        self.assertTrue(window._placeholder_active)
+        window._start()
+        self.assertEqual(calls, [])
+        self.assertIs(root.focus_get(), window._task_box)
+
+        window._clear_placeholder()
+        window._task_box.insert("1.0", "Aé")
+        window._update_task_usage()
+        self.assertEqual(window._task_usage.get(), "3 / 32,768 bytes")
+
+        window._task_box.delete("1.0", "end")
+        window._task_box.insert("1.0", "x" * 32_769)
+        window._update_task_usage()
+        window._start()
+        self.assertEqual(calls, [])
+        self.assertIn("too long", window._status.get().lower())
+        self.assertIs(root.focus_get(), window._task_box)
 
 
 if __name__ == "__main__":
