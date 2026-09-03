@@ -7,6 +7,14 @@ from pathlib import Path
 from threading import Lock, Thread
 from typing import Any, Callable
 
+from chatmpd.presentation import (
+    TaskPresentation,
+    UiTone,
+    format_task_presentation,
+    present_error,
+    present_task_outcome,
+)
+
 
 @dataclass(frozen=True)
 class UiSnapshot:
@@ -14,8 +22,10 @@ class UiSnapshot:
 
     busy: bool
     status: str
-    result: str
+    tone: UiTone
+    result: TaskPresentation | None
     start_enabled: bool
+    submitted_task: str = ""
 
 
 class ChatMPDController:
@@ -43,7 +53,13 @@ class ChatMPDController:
         cleaned_workspace = str(workspace).strip()
         if not cleaned_workspace:
             self._publish(
-                UiSnapshot(False, "Choose a project folder first.", "", True)
+                UiSnapshot(
+                    False,
+                    "Choose a project folder first.",
+                    "warning",
+                    None,
+                    True,
+                )
             )
             return False
         cleaned_task = str(task).strip()
@@ -52,7 +68,8 @@ class ChatMPDController:
                 UiSnapshot(
                     False,
                     "Describe what you want ChatMPD to do.",
-                    "",
+                    "warning",
+                    None,
                     True,
                 )
             )
@@ -66,12 +83,22 @@ class ChatMPDController:
                 UiSnapshot(
                     True,
                     "ChatMPD is already working on a task.",
-                    "",
+                    "working",
+                    None,
                     False,
                 )
             )
             return False
-        self._publish(UiSnapshot(True, "ChatMPD is working...", "", False))
+        self._publish(
+            UiSnapshot(
+                True,
+                "ChatMPD is working locally...",
+                "working",
+                None,
+                False,
+                cleaned_task,
+            )
+        )
         Thread(
             target=self._run,
             args=(Path(cleaned_workspace), cleaned_task),
@@ -83,34 +110,40 @@ class ChatMPDController:
     def _run(self, workspace: Path, task: str) -> None:
         try:
             outcome = self._task_runner(workspace, task)
-            result = format_task_outcome(outcome)
-            succeeded = outcome.result.status == "succeeded"
+            result = present_task_outcome(outcome)
         except Exception as error:
-            detail = " ".join(str(error).split())[:1_000]
-            if not detail:
-                detail = "An unexpected problem stopped ChatMPD."
-            self._schedule(lambda detail=detail: self._finish_error(detail))
+            result = present_error(error)
+            self._schedule(lambda result=result: self._finish_error(result))
             return
-        self._schedule(lambda: self._finish_outcome(result, succeeded))
+        self._schedule(lambda result=result: self._finish_outcome(result))
 
-    def _finish_outcome(self, result: str, succeeded: bool) -> None:
+    def _finish_outcome(self, result: TaskPresentation) -> None:
         with self._lock:
             self._busy = False
-        status = (
-            "Task finished successfully."
-            if succeeded
-            else "Task finished, but its checks did not pass."
+        succeeded = result.kind == "success"
+        self._publish(
+            UiSnapshot(
+                False,
+                (
+                    "Task finished successfully."
+                    if succeeded
+                    else "Task finished, but its checks did not pass."
+                ),
+                "success" if succeeded else "warning",
+                result,
+                True,
+            )
         )
-        self._publish(UiSnapshot(False, status, result, True))
 
-    def _finish_error(self, detail: str) -> None:
+    def _finish_error(self, result: TaskPresentation) -> None:
         with self._lock:
             self._busy = False
         self._publish(
             UiSnapshot(
                 False,
                 "ChatMPD could not finish this task.",
-                f"{detail}\n\nYou can fix the problem and try again.",
+                "error",
+                result,
                 True,
             )
         )
@@ -229,7 +262,9 @@ class ChatMPDWindow:
         self._result_box.configure(state="normal")
         self._result_box.delete("1.0", "end")
         if snapshot.result:
-            self._result_box.insert("1.0", snapshot.result)
+            self._result_box.insert(
+                "1.0", format_task_presentation(snapshot.result)
+            )
         self._result_box.configure(state="disabled")
 
 
@@ -246,23 +281,4 @@ def launch_gui(task_runner: Callable[[Path, str], Any]) -> None:
 def format_task_outcome(outcome: Any) -> str:
     """Turn a completed task outcome into a concise, nontechnical summary."""
 
-    result = outcome.result
-    sections = [str(result.summary).strip()]
-    changed_files = list(result.changed_files)
-    if changed_files:
-        sections.append(
-            "Changed files:\n" + "\n".join(f"- {path}" for path in changed_files)
-        )
-    else:
-        sections.append("Changed files:\n- None")
-    checks = list(result.checks)
-    if checks:
-        check_lines = []
-        for check in checks:
-            state = "PASSED" if check.exit_code == 0 else "FAILED"
-            check_lines.append(f"- {state}: {' '.join(check.argv)}")
-        sections.append("Checks:\n" + "\n".join(check_lines))
-    else:
-        sections.append("Checks:\n- None recorded")
-    sections.append(f"Details saved at:\n{result.state_file}")
-    return "\n\n".join(sections)
+    return format_task_presentation(present_task_outcome(outcome))

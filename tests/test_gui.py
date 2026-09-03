@@ -196,7 +196,10 @@ class ChatMPDControllerTest(unittest.TestCase):
         self.assertTrue(runner_started.wait(1))
         self.assertNotEqual(runner_thread, [get_ident()])
         self.assertTrue(controller.busy)
-        self.assertEqual(snapshots[-1].status, "ChatMPD is working...")
+        self.assertEqual(snapshots[-1].status, "ChatMPD is working locally...")
+        self.assertEqual(snapshots[-1].tone, "working")
+        self.assertEqual(snapshots[-1].submitted_task, "Repair the calculator")
+        self.assertIsNone(snapshots[-1].result)
         self.assertFalse(snapshots[-1].start_enabled)
 
         release_runner.set()
@@ -204,8 +207,10 @@ class ChatMPDControllerTest(unittest.TestCase):
 
         self.assertFalse(controller.busy)
         self.assertEqual(snapshots[-1].status, "Task finished successfully.")
+        self.assertEqual(snapshots[-1].tone, "success")
+        self.assertEqual(snapshots[-1].result.kind, "success")
+        self.assertEqual(snapshots[-1].result.changed_files, ("calculator.py",))
         self.assertTrue(snapshots[-1].start_enabled)
-        self.assertIn("Changed files:\n- calculator.py", snapshots[-1].result)
 
     def test_rejects_a_second_start_while_a_task_is_running(self) -> None:
         release_runner = Event()
@@ -238,6 +243,8 @@ class ChatMPDControllerTest(unittest.TestCase):
             snapshots[-1].status,
             "ChatMPD is already working on a task.",
         )
+        self.assertEqual(snapshots[-1].tone, "working")
+        self.assertIsNone(snapshots[-1].result)
         self.assertFalse(snapshots[-1].start_enabled)
 
         release_runner.set()
@@ -260,6 +267,8 @@ class ChatMPDControllerTest(unittest.TestCase):
         self.assertFalse(accepted)
         self.assertFalse(controller.busy)
         self.assertEqual(snapshots[-1].status, "Choose a project folder first.")
+        self.assertEqual(snapshots[-1].tone, "warning")
+        self.assertIsNone(snapshots[-1].result)
         self.assertTrue(snapshots[-1].start_enabled)
 
     def test_rejects_a_blank_task_before_starting_a_worker(self) -> None:
@@ -279,6 +288,8 @@ class ChatMPDControllerTest(unittest.TestCase):
         self.assertFalse(accepted)
         self.assertFalse(controller.busy)
         self.assertEqual(snapshots[-1].status, "Describe what you want ChatMPD to do.")
+        self.assertEqual(snapshots[-1].tone, "warning")
+        self.assertIsNone(snapshots[-1].result)
         self.assertTrue(snapshots[-1].start_enabled)
 
     def test_turns_worker_failure_into_a_friendly_retryable_result(self) -> None:
@@ -302,9 +313,11 @@ class ChatMPDControllerTest(unittest.TestCase):
             snapshots[-1].status,
             "ChatMPD could not finish this task.",
         )
+        self.assertEqual(snapshots[-1].tone, "error")
+        self.assertEqual(snapshots[-1].result.kind, "error")
         self.assertEqual(
-            snapshots[-1].result,
-            "The local ChatMPD model is not ready\n\nYou can fix the problem and try again.",
+            snapshots[-1].result.summary,
+            "The local ChatMPD model is not ready",
         )
         self.assertTrue(snapshots[-1].start_enabled)
 
@@ -330,7 +343,9 @@ class ChatMPDControllerTest(unittest.TestCase):
             snapshots[-1].status,
             "Task finished, but its checks did not pass.",
         )
-        self.assertIn("- FAILED: python -m unittest", snapshots[-1].result)
+        self.assertEqual(snapshots[-1].tone, "warning")
+        self.assertEqual(snapshots[-1].result.kind, "verification_failed")
+        self.assertFalse(snapshots[-1].result.checks[0].passed)
         self.assertTrue(snapshots[-1].start_enabled)
 
 
