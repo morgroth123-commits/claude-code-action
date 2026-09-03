@@ -60,9 +60,9 @@ The important split is that file edits happen in the selected Windows project th
 
 ## Task path and component behavior
 
-### 1. Input and local model runtime
+### 1. Input, project preflight, and local model runtime
 
-The GUI passes a chosen project directory and non-empty task to `run_local_task`; its folder chooser normally returns an existing directory. The optional CLI validates that the workspace already exists and the task is non-empty before acquiring the runtime. The GUI/CLI live path then enters the `LlamaCppRuntime` context before calling the task service.
+The GUI passes a chosen project directory and non-empty task to `run_local_task`; its folder chooser normally returns an existing directory. The optional CLI validates that the workspace already exists and the task is non-empty. Both live paths complete `prepare_project_task()`—including workspace resolution, task-size validation, project profiling, Git-context collection, and verification selection—before entering the `LlamaCppRuntime` context. A preflight failure therefore does not start llama.cpp.
 
 `LlamaCppRuntime` discovers:
 
@@ -83,9 +83,9 @@ Performance mode is selected at startup:
 
 `--parallel 1` applies in both modes. WSL snapshotting and checks are separate processes and can still use host resources.
 
-### 2. Project profiling
+### 2. Prepared project context
 
-After the local endpoint is ready, the service resolves the project directory and rejects task text larger than 32 KiB. Project profiling scans regular files without following symbolic links or Windows junctions. Its initial model manifest is capped at 500 entries. Repository/internal state, build output, virtual environments, caches, and common secret locations are excluded. If local Git is available, ChatMPD runs bounded local queries to obtain:
+Before the local endpoint is started, project preflight resolves the directory and rejects task text larger than 32 KiB. Project profiling scans regular files without following symbolic links or Windows junctions. Its initial model manifest is capped at 500 entries. Repository/internal state, build output, virtual environments, caches, and common secret locations are excluded. If local Git is available, ChatMPD runs bounded local queries to obtain:
 
 - repository root
 - branch or detached revision

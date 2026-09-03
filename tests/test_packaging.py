@@ -36,6 +36,28 @@ class PackagingDefinitionTest(unittest.TestCase):
         self.assertIn("from chatmpd.app import main", launcher)
         self.assertNotIn("from chatmpd.cli import main", launcher)
 
+    def test_build_copies_the_usage_guide_beside_the_executable(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        guide = (root / "docs" / "most-effective-usage.md").read_text(
+            encoding="utf-8"
+        )
+        build = (root / "scripts" / "build-windows.ps1").read_text(
+            encoding="utf-8"
+        )
+        readme = (root / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("# Most Effective Use of ChatMPD", guide)
+        self.assertIn("Ctrl+Enter", guide)
+        self.assertIn("Never put passwords", guide)
+        self.assertIn("Most Effective Usage.md", build)
+        self.assertIn("docs/most-effective-usage.md", readme)
+
+    def test_runtime_keeps_zero_required_third_party_dependencies(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        project = (root / "pyproject.toml").read_text(encoding="utf-8")
+
+        self.assertIn("dependencies = []", project)
+
 
 if __name__ == "__main__":
     unittest.main()

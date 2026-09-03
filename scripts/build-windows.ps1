@@ -14,7 +14,10 @@ try {
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
         throw "The build completed without creating dist\ChatMPD.exe"
     }
-    Get-Item -LiteralPath $executable | Select-Object FullName, Length, LastWriteTime
+    $sourceGuide = Join-Path $repository "docs\most-effective-usage.md"
+    $distGuide = Join-Path $repository "dist\Most Effective Usage.md"
+    Copy-Item -LiteralPath $sourceGuide -Destination $distGuide -Force
+    Get-Item -LiteralPath $executable, $distGuide | Select-Object FullName, Length, LastWriteTime
     Get-FileHash -LiteralPath $executable -Algorithm SHA256
 }
 finally {

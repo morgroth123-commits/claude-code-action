@@ -24,18 +24,18 @@ If ChatMPD is already installed on this computer:
 
 1. Double-click `ChatMPD.exe`. Double-clicking opens the graphical interface; a terminal is not required.
 2. If Microsoft Defender SmartScreen says the app is unrecognized, verify where the file came from before choosing **More info** and **Run anyway**. Current local builds are unsigned, so this warning is expected. Do not bypass the warning for a file you do not trust.
-3. Choose a Python project folder. A Git repository is recommended but not required.
+3. Select **Choose project** and choose a Python project folder. A Git repository is recommended but not required.
 4. Enter a specific task, such as “Fix the failing total calculation and keep the public function names unchanged.” Never put passwords, tokens, or other secrets in the task text.
-5. Select **Start ChatMPD** and leave the project files alone until the task finishes.
+5. Select **Start task** and leave the project files alone until the task finishes.
 6. Review the summary, changed-file list, and check result. The window shows the exact path to the saved run record.
 
 For first-time installation, model placement, WSL, and bubblewrap instructions, see [Windows setup](docs/setup-windows.md).
 
 ## What happens during a task
 
-1. ChatMPD requires the loopback endpoint at `127.0.0.1:8080` to be idle, then starts its own llama.cpp server. It refuses any already-healthy service on that endpoint, including one advertising ChatMPD's alias. The GUI task path acquires this runtime before project profiling.
-2. It inventories a bounded set of safe project files and, if the folder is a Git repository, collects sanitized local branch, status, and diff information.
-3. It identifies one supported Python verification command: `unittest` discovery when it recognizes a standard-library unittest case under `tests/`, otherwise Python bytecode compilation with `compileall`, and asks the local Qwen model to plan the task.
+1. `prepare_project_task()` validates the request, inventories a bounded set of safe project files, collects sanitized local Git context when available, and selects the one supported Python verification command. This preflight completes before ChatMPD enters `LlamaCppRuntime`.
+2. ChatMPD then requires the loopback endpoint at `127.0.0.1:8080` to be idle and starts its own llama.cpp server. It refuses any already-healthy service on that endpoint, including one advertising ChatMPD's alias.
+3. Using the prepared project context, it asks the local Qwen model to plan the task. Verification uses `unittest` discovery when preflight recognizes a standard-library unittest case under `tests/`, otherwise Python bytecode compilation with `compileall`.
 4. The agent can list, read, or atomically replace permitted UTF-8 project files. Protected state and known secret paths are denied.
 5. Before an existing file is replaced, its original contents are copied to that run's `backups/` folder, subject to the 256 KiB file limit.
 6. Verification receives a filtered snapshot rather than the live project. WSL Ubuntu and bubblewrap run the exact approved Python command with networking unshared and the environment cleared.
@@ -114,6 +114,7 @@ Command-line details and exit codes are documented in [Troubleshooting](docs/tro
 
 ## Documentation
 
+- [Most Effective Usage](docs/most-effective-usage.md)
 - [Windows setup](docs/setup-windows.md)
 - [Architecture](docs/architecture.md)
 - [Security model](docs/security.md)

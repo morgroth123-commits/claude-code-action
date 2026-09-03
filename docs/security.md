@@ -74,7 +74,7 @@ Success is gated independently of the model's wording: each required command mus
 
 ## WSL Ubuntu and bubblewrap verification
 
-ChatMPD creates an in-memory temporary tar snapshot of safe regular files. The live workspace, `.git`, `.chatmpd`, secrets, caches, virtual environments, and links are not mounted into bubblewrap. The snapshot is extracted under a random `/tmp/chatmpd-sandbox-*` directory inside WSL and deleted by the guest cleanup handler.
+ChatMPD creates a temporary tar snapshot of safe regular files with `tempfile.TemporaryFile`. That host-managed temporary file may use memory or disk according to the operating system; ChatMPD does not guarantee memory-only storage. The live workspace, `.git`, `.chatmpd`, secrets, caches, virtual environments, and links are not mounted into bubblewrap. The snapshot is extracted under a random `/tmp/chatmpd-sandbox-*` directory inside WSL and deleted by the guest cleanup handler.
 
 The bubblewrap invocation uses:
 
