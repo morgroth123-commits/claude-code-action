@@ -582,6 +582,7 @@ class ChatMPDWindowConstructionTest(unittest.TestCase):
             any("Describe the result you want" in text for text in toolkit.label_texts())
         )
         self.assertTrue(any("No cloud model" in text for text in toolkit.label_texts()))
+        self.assertFalse(window._progress.visible)
 
         toolkit.find("Button", "Choose project").invoke()
         workspace_entry = toolkit.find("Entry")
@@ -696,6 +697,7 @@ class ChatMPDWindowTest(unittest.TestCase):
         self.assertIn("Repair the calculator", window._timeline.text)
         self.assertIn("CHATMPD IS WORKING LOCALLY", window._timeline.text)
         self.assertGreaterEqual(window._progress.start_calls, 1)
+        self.assertTrue(window._progress.visible)
         self.assertEqual(start_button.options["state"], "disabled")
 
         release_runner.set()
@@ -710,6 +712,7 @@ class ChatMPDWindowTest(unittest.TestCase):
             window._timeline.text.casefold(),
         )
         self.assertGreaterEqual(window._progress.stop_calls, 1)
+        self.assertFalse(window._progress.visible)
         self.assertEqual(toolkit.find("Button", "Copy result").options["state"], "normal")
         self.assertEqual(
             toolkit.find("Button", "Open run folder").options["state"], "normal"
@@ -775,6 +778,10 @@ class ChatMPDWindowAppearanceTest(unittest.TestCase):
         window._apply_theme("not-a-theme")
         self.assertEqual(window._theme_name, "system")
         self.assertEqual(window._theme.get(), "System")
+        self.assertEqual(
+            toolkit.style.configurations["Accent.TButton"]["foreground"],
+            palette_for("system").text,
+        )
 
     def test_text_scaling_uses_bounded_steps_and_reset(self) -> None:
         toolkit = FakeToolkit()

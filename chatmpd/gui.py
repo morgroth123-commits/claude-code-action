@@ -733,6 +733,12 @@ class ChatMPDWindow:
                 pass
 
         self._root.configure(background=palette.canvas)
+        accent_background = (
+            palette.elevated if normalized == "system" else palette.accent
+        )
+        accent_foreground = (
+            palette.text if normalized == "system" else palette.accent_text
+        )
         style_values = {
             "App.TFrame": {"background": palette.canvas},
             "Surface.TFrame": {"background": palette.surface},
@@ -772,8 +778,8 @@ class ChatMPDWindow:
                 "focuscolor": palette.focus,
             },
             "Accent.TButton": {
-                "background": palette.accent,
-                "foreground": palette.accent_text,
+                "background": accent_background,
+                "foreground": accent_foreground,
                 "focuscolor": palette.focus,
             },
             "App.TEntry": {
@@ -897,9 +903,11 @@ class ChatMPDWindow:
             self._current_result = snapshot.result
 
         if snapshot.tone == "working":
+            self._progress.grid()
             self._progress.start(12)
         else:
             self._progress.stop()
+            self._progress.grid_remove()
 
         self._render_timeline(snapshot)
         has_result = self._current_result is not None and not snapshot.busy
