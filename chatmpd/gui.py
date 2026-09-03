@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock, Thread
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from chatmpd.presentation import (
@@ -149,8 +150,32 @@ class ChatMPDController:
         )
 
 
+def _load_toolkit() -> Any:
+    """Load native Tk text widgets and themed ttk controls."""
+
+    import tkinter as tk
+    from tkinter import ttk
+
+    return SimpleNamespace(
+        StringVar=tk.StringVar,
+        Frame=ttk.Frame,
+        LabelFrame=ttk.LabelFrame,
+        Label=ttk.Label,
+        Entry=ttk.Entry,
+        Button=ttk.Button,
+        Combobox=ttk.Combobox,
+        Progressbar=ttk.Progressbar,
+        Scrollbar=ttk.Scrollbar,
+        Separator=ttk.Separator,
+        Style=ttk.Style,
+        Text=tk.Text,
+    )
+
+
 class ChatMPDWindow:
-    """The nontechnical Tk desktop window, with dependencies supplied."""
+    """A local-first assistant workspace backed by native Windows controls."""
+
+    _COMPACT_BREAKPOINT = 900
 
     def __init__(
         self,
@@ -161,7 +186,7 @@ class ChatMPDWindow:
         choose_directory: Callable[[], str] | None = None,
     ) -> None:
         if toolkit is None:
-            import tkinter as toolkit
+            toolkit = _load_toolkit()
         if choose_directory is None:
             from tkinter import filedialog
 
@@ -171,74 +196,237 @@ class ChatMPDWindow:
                 title="Choose the project ChatMPD should work on",
             )
 
+        self._toolkit = toolkit
         self._choose_directory = choose_directory
         self._root = root
         self._workspace = toolkit.StringVar(value="")
-        self._status = toolkit.StringVar(value="Ready.")
+        self._status = toolkit.StringVar(value="Ready for a local task.")
+        self._project_state = toolkit.StringVar(value="Choose a project")
+        self._submitted_task = ""
+        self._current_result: TaskPresentation | None = None
+        self._compact_layout: bool | None = None
 
-        root.title("ChatMPD")
-        root.minsize(720, 640)
-        content = toolkit.Frame(root, padx=24, pady=20)
-        content.pack(fill="both", expand=True)
+        root.title("ChatMPD — Local project assistant")
+        root.geometry("1100x760")
+        root.minsize(780, 640)
+        root.columnconfigure(0, weight=1)
+        root.rowconfigure(0, weight=1)
 
-        toolkit.Label(
-            content,
-            text="ChatMPD",
-            font=("Segoe UI", 20, "bold"),
-        ).pack(anchor="w")
-        toolkit.Label(
-            content,
-            text="Choose a project, describe the result you want, then press Start.",
-            justify="left",
-        ).pack(anchor="w", pady=(4, 18))
+        self._shell = toolkit.Frame(root, padding=(24, 20))
+        self._shell.grid(row=0, column=0, sticky="nsew")
+        self._shell.columnconfigure(1, weight=1)
+        self._shell.rowconfigure(1, weight=1)
+        self._shell.rowconfigure(2, weight=1)
 
-        toolkit.Label(content, text="Project folder").pack(anchor="w")
-        folder_row = toolkit.Frame(content)
-        folder_row.pack(fill="x", pady=(4, 16))
-        toolkit.Entry(
-            folder_row,
-            textvariable=self._workspace,
-            state="readonly",
-        ).pack(side="left", fill="x", expand=True)
-        toolkit.Button(
-            folder_row,
-            text="Choose folder",
-            command=self._browse,
-        ).pack(side="left", padx=(8, 0))
-
-        toolkit.Label(content, text="What should ChatMPD do?").pack(anchor="w")
-        self._task_box = toolkit.Text(content, height=9, wrap="word")
-        self._task_box.pack(fill="both", expand=False, pady=(4, 12))
-
-        self._start_button = toolkit.Button(
-            content,
-            text="Start ChatMPD",
-            command=self._start,
-            state="normal",
-        )
-        self._start_button.pack(anchor="w", pady=(0, 14))
-
-        toolkit.Label(content, textvariable=self._status).pack(anchor="w")
-        toolkit.Label(content, text="Result").pack(anchor="w", pady=(16, 0))
-        self._result_box = toolkit.Text(
-            content,
-            height=13,
-            wrap="word",
-            state="disabled",
-        )
-        self._result_box.pack(fill="both", expand=True, pady=(4, 0))
+        self._build_header()
+        self._build_project_panel()
+        self._build_timeline()
+        self._build_composer()
+        self._build_footer()
 
         self._controller = ChatMPDController(
             task_runner=task_runner,
             schedule=lambda callback: root.after(0, callback),
             publish=self._render,
         )
+        root.bind("<Configure>", self._on_configure)
         root.protocol("WM_DELETE_WINDOW", self._close)
+        self._apply_layout(compact=False)
+        self._render(
+            UiSnapshot(
+                False,
+                "Ready for a local task.",
+                "neutral",
+                None,
+                True,
+            )
+        )
+
+    def _build_header(self) -> None:
+        toolkit = self._toolkit
+        header = toolkit.Frame(self._shell)
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 18))
+        header.columnconfigure(0, weight=1)
+        toolkit.Label(
+            header,
+            text="ChatMPD",
+            font=("Segoe UI", 22, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+        toolkit.Label(
+            header,
+            text="A private workspace for real work in your local projects",
+        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+        toolkit.Label(
+            header,
+            text="Local · Private",
+        ).grid(row=0, column=1, sticky="e", padx=(12, 12))
+        self._help_button = toolkit.Button(
+            header,
+            text="Help",
+            command=lambda: None,
+        )
+        self._help_button.grid(row=0, column=2, rowspan=2, sticky="e")
+
+    def _build_project_panel(self) -> None:
+        toolkit = self._toolkit
+        self._project_panel = toolkit.LabelFrame(
+            self._shell,
+            text="Project",
+            padding=(16, 14),
+        )
+        self._project_panel.columnconfigure(0, weight=1)
+        toolkit.Label(
+            self._project_panel,
+            text="Choose the folder ChatMPD may inspect and change.",
+            wraplength=260,
+            justify="left",
+        ).grid(row=0, column=0, sticky="w")
+        self._workspace_entry = toolkit.Entry(
+            self._project_panel,
+            textvariable=self._workspace,
+            state="readonly",
+        )
+        self._workspace_entry.grid(row=1, column=0, sticky="ew", pady=(12, 8))
+        self._choose_button = toolkit.Button(
+            self._project_panel,
+            text="Choose project",
+            command=self._browse,
+        )
+        self._choose_button.grid(row=2, column=0, sticky="ew")
+        toolkit.Separator(self._project_panel).grid(
+            row=3, column=0, sticky="ew", pady=14
+        )
+        toolkit.Label(
+            self._project_panel,
+            textvariable=self._project_state,
+        ).grid(row=4, column=0, sticky="w")
+        toolkit.Label(
+            self._project_panel,
+            text="No cloud model or API key required.",
+            wraplength=260,
+            justify="left",
+        ).grid(row=5, column=0, sticky="w", pady=(6, 0))
+
+    def _build_timeline(self) -> None:
+        toolkit = self._toolkit
+        self._main_panel = toolkit.Frame(self._shell)
+        self._main_panel.columnconfigure(0, weight=1)
+        self._main_panel.rowconfigure(1, weight=1)
+        toolkit.Label(
+            self._main_panel,
+            text="Task activity",
+            font=("Segoe UI", 12, "bold"),
+        ).grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+        timeline_frame = toolkit.Frame(self._main_panel)
+        timeline_frame.grid(row=1, column=0, sticky="nsew")
+        timeline_frame.columnconfigure(0, weight=1)
+        timeline_frame.rowconfigure(0, weight=1)
+        self._timeline = toolkit.Text(
+            timeline_frame,
+            wrap="word",
+            state="disabled",
+            padx=18,
+            pady=16,
+            borderwidth=1,
+            relief="solid",
+            takefocus=True,
+        )
+        self._timeline.grid(row=0, column=0, sticky="nsew")
+        scrollbar = toolkit.Scrollbar(
+            timeline_frame,
+            orient="vertical",
+            command=self._timeline.yview,
+        )
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self._timeline.configure(yscrollcommand=scrollbar.set)
+        self._timeline.tag_configure("heading", font=("Segoe UI", 9, "bold"))
+        self._timeline.tag_configure("user", font=("Segoe UI", 11))
+        self._timeline.tag_configure("assistant", font=("Segoe UI", 11))
+        self._timeline.tag_configure("success", font=("Segoe UI", 10, "bold"))
+        self._timeline.tag_configure("warning", font=("Segoe UI", 10, "bold"))
+        self._timeline.tag_configure("error", font=("Segoe UI", 10, "bold"))
+        self._timeline.tag_configure("muted", font=("Segoe UI", 9))
+        self._result_box = self._timeline
+
+        self._progress = toolkit.Progressbar(
+            self._main_panel,
+            mode="indeterminate",
+        )
+        self._progress.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+
+        actions = toolkit.Frame(self._main_panel)
+        actions.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        self._copy_button = toolkit.Button(
+            actions,
+            text="Copy result",
+            command=lambda: None,
+            state="disabled",
+        )
+        self._copy_button.grid(row=0, column=0, sticky="w")
+        self._open_button = toolkit.Button(
+            actions,
+            text="Open run folder",
+            command=lambda: None,
+            state="disabled",
+        )
+        self._open_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        self._new_button = toolkit.Button(
+            actions,
+            text="New task",
+            command=lambda: None,
+            state="disabled",
+        )
+        self._new_button.grid(row=0, column=2, sticky="w", padx=(8, 0))
+
+    def _build_composer(self) -> None:
+        toolkit = self._toolkit
+        composer = toolkit.LabelFrame(
+            self._main_panel,
+            text="Describe the result you want",
+            padding=(14, 12),
+        )
+        composer.grid(row=4, column=0, sticky="ew", pady=(14, 0))
+        composer.columnconfigure(0, weight=1)
+        self._task_box = toolkit.Text(
+            composer,
+            height=5,
+            wrap="word",
+            padx=10,
+            pady=8,
+        )
+        self._task_box.grid(row=0, column=0, columnspan=2, sticky="ew")
+        toolkit.Label(
+            composer,
+            text="Be specific about the outcome and the checks that must pass.",
+        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        self._start_button = toolkit.Button(
+            composer,
+            text="Start task",
+            command=self._start,
+            state="normal",
+        )
+        self._start_button.grid(row=1, column=1, sticky="e", padx=(12, 0), pady=(8, 0))
+
+    def _build_footer(self) -> None:
+        toolkit = self._toolkit
+        footer = toolkit.Frame(self._shell)
+        footer.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        footer.columnconfigure(0, weight=1)
+        toolkit.Separator(footer).grid(row=0, column=0, columnspan=2, sticky="ew")
+        toolkit.Label(footer, textvariable=self._status).grid(
+            row=1, column=0, sticky="w", pady=(8, 0)
+        )
+        toolkit.Label(footer, text="Local execution · keep secrets out of tasks").grid(
+            row=1, column=1, sticky="e", pady=(8, 0)
+        )
 
     def _browse(self) -> None:
         selected = self._choose_directory()
         if selected:
             self._workspace.set(selected)
+            self._project_state.set("Project ready")
+            self._status.set("Project selected. Describe the result you want.")
 
     def _start(self) -> None:
         self._controller.start(
@@ -254,18 +442,137 @@ class ChatMPDWindow:
             return
         self._root.destroy()
 
+    def _on_configure(self, event: Any) -> None:
+        if getattr(event, "widget", self._root) is not self._root:
+            return
+        width = int(getattr(event, "width", 1100))
+        self._apply_layout(compact=width < self._COMPACT_BREAKPOINT)
+
+    def _apply_layout(self, *, compact: bool) -> None:
+        if compact == self._compact_layout:
+            return
+        self._compact_layout = compact
+        if compact:
+            self._project_panel.grid(
+                row=1,
+                column=0,
+                columnspan=2,
+                sticky="ew",
+                pady=(0, 14),
+            )
+            self._main_panel.grid(
+                row=2,
+                column=0,
+                columnspan=2,
+                sticky="nsew",
+            )
+        else:
+            self._project_panel.grid(
+                row=1,
+                column=0,
+                columnspan=1,
+                sticky="nsew",
+                padx=(0, 18),
+            )
+            self._main_panel.grid(
+                row=1,
+                column=1,
+                columnspan=1,
+                sticky="nsew",
+            )
+
     def _render(self, snapshot: UiSnapshot) -> None:
         self._status.set(snapshot.status)
+        self._project_state.set(
+            "Project ready" if str(self._workspace.get()).strip() else "Choose a project"
+        )
+        self._choose_button.configure(state="disabled" if snapshot.busy else "normal")
+        self._workspace_entry.configure(
+            state="disabled" if snapshot.busy else "readonly"
+        )
+        self._task_box.configure(state="disabled" if snapshot.busy else "normal")
         self._start_button.configure(
             state="normal" if snapshot.start_enabled else "disabled"
         )
-        self._result_box.configure(state="normal")
-        self._result_box.delete("1.0", "end")
-        if snapshot.result:
-            self._result_box.insert(
-                "1.0", format_task_presentation(snapshot.result)
+
+        if snapshot.submitted_task:
+            self._submitted_task = snapshot.submitted_task
+            self._current_result = None
+        if snapshot.result is not None:
+            self._current_result = snapshot.result
+
+        if snapshot.tone == "working":
+            self._progress.start(12)
+        else:
+            self._progress.stop()
+
+        self._render_timeline(snapshot)
+        has_result = self._current_result is not None and not snapshot.busy
+        self._copy_button.configure(state="normal" if has_result else "disabled")
+        self._new_button.configure(state="normal" if has_result else "disabled")
+        can_open = bool(
+            has_result
+            and self._current_result is not None
+            and self._current_result.state_file is not None
+        )
+        self._open_button.configure(state="normal" if can_open else "disabled")
+
+    def _render_timeline(self, snapshot: UiSnapshot) -> None:
+        self._timeline.configure(state="normal")
+        self._timeline.delete("1.0", "end")
+        if self._submitted_task:
+            self._timeline.insert("end", "YOU ASKED\n", "heading")
+            self._timeline.insert("end", f"{self._submitted_task}\n\n", "user")
+
+        if snapshot.busy:
+            self._timeline.insert(
+                "end", "CHATMPD IS WORKING LOCALLY\n", "heading"
             )
-        self._result_box.configure(state="disabled")
+            self._timeline.insert(
+                "end",
+                "Your local model is working inside the selected project. "
+                "ChatMPD will report the actual result when it finishes.\n",
+                "assistant",
+            )
+        elif self._current_result is not None:
+            result = self._current_result
+            heading, tag = {
+                "success": ("CHECKS PASSED", "success"),
+                "verification_failed": ("CHECKS NEED ATTENTION", "warning"),
+                "error": ("TASK COULD NOT FINISH", "error"),
+            }[result.kind]
+            self._timeline.insert("end", f"{heading}\n", tag)
+            self._timeline.insert("end", f"{result.summary}\n\n", "assistant")
+
+            self._timeline.insert("end", "CHANGED FILES\n", "heading")
+            if result.changed_files:
+                for path in result.changed_files:
+                    self._timeline.insert("end", f"• {path}\n", "assistant")
+            else:
+                self._timeline.insert("end", "None\n", "muted")
+
+            self._timeline.insert("end", "\nVERIFICATION\n", "heading")
+            if result.checks:
+                for check in result.checks:
+                    label = "PASSED" if check.passed else "FAILED"
+                    tag = "success" if check.passed else "error"
+                    self._timeline.insert("end", f"{label} — {check.label}\n", tag)
+            else:
+                self._timeline.insert("end", "No checks recorded\n", "muted")
+
+            if result.state_file is not None:
+                self._timeline.insert("end", "\nRUN RECORD\n", "heading")
+                self._timeline.insert("end", str(result.state_file), "muted")
+        else:
+            self._timeline.insert("end", "READY FOR A LOCAL TASK\n", "heading")
+            self._timeline.insert(
+                "end",
+                "Choose a project and describe one concrete outcome. "
+                "ChatMPD will show what changed and which checks passed.\n",
+                "assistant",
+            )
+        self._timeline.configure(state="disabled")
+        self._timeline.see("end")
 
 
 def launch_gui(task_runner: Callable[[Path, str], Any]) -> None:

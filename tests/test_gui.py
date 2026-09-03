@@ -41,19 +41,65 @@ class FakeVariable:
 
 
 class FakeWidget:
-    def __init__(self, kind: str, options: dict[str, object]) -> None:
+    def __init__(
+        self,
+        kind: str,
+        options: dict[str, object],
+        toolkit: "FakeToolkit",
+    ) -> None:
         self.kind = kind
         self.options = dict(options)
+        self.toolkit = toolkit
         self.text = ""
+        self.grid_calls: list[dict[str, object]] = []
+        self.grid_configure_calls: list[dict[str, object]] = []
+        self.pack_calls: list[dict[str, object]] = []
+        self.bindings: dict[str, object] = {}
+        self.tags: dict[str, dict[str, object]] = {}
+        self.see_calls: list[object] = []
+        self.start_calls = 0
+        self.stop_calls = 0
+        self.visible = True
+        self.columns: dict[int, int] = {}
+        self.rows: dict[int, int] = {}
 
-    def pack(self, **unused: object) -> None:
-        return None
+    def pack(self, **options: object) -> None:
+        self.pack_calls.append(dict(options))
+        self.visible = True
+
+    def pack_forget(self) -> None:
+        self.visible = False
+
+    def grid(self, **options: object) -> None:
+        self.grid_calls.append(dict(options))
+        self.visible = True
+
+    def grid_configure(self, **options: object) -> None:
+        self.grid_configure_calls.append(dict(options))
+        if self.grid_calls:
+            self.grid_calls[-1].update(options)
+
+    def grid_remove(self) -> None:
+        self.visible = False
+
+    def columnconfigure(self, column: int, weight: int = 0, **unused: object) -> None:
+        self.columns[column] = weight
+
+    def rowconfigure(self, row: int, weight: int = 0, **unused: object) -> None:
+        self.rows[row] = weight
 
     def configure(self, **options: object) -> None:
         self.options.update(options)
 
-    def insert(self, unused_index: object, text: str) -> None:
-        self.text = text
+    config = configure
+
+    def insert(
+        self,
+        unused_index: object,
+        text: str,
+        unused_tags: object = None,
+    ) -> None:
+        self.text += text
 
     def delete(self, unused_start: object, unused_end: object = None) -> None:
         self.text = ""
@@ -66,12 +112,73 @@ class FakeWidget:
         if callable(command):
             command()
 
+    def bind(self, sequence: str, callback: object) -> None:
+        self.bindings[sequence] = callback
+
+    def focus_set(self) -> None:
+        self.toolkit.focused_widget = self
+        if self.toolkit.root is not None:
+            self.toolkit.root.focused_widget = self
+
+    def tag_configure(self, name: str, **options: object) -> None:
+        self.tags[name] = dict(options)
+
+    tag_config = tag_configure
+
+    def see(self, index: object) -> None:
+        self.see_calls.append(index)
+
+    def start(self, unused_interval: int = 50) -> None:
+        self.start_calls += 1
+
+    def stop(self) -> None:
+        self.stop_calls += 1
+
+    def yview(self, *unused: object) -> None:
+        return None
+
+    def set(self, *unused: object) -> None:
+        return None
+
+
+class FakeStyle:
+    def __init__(self) -> None:
+        self.configurations: dict[str, dict[str, object]] = {}
+        self.maps: dict[str, dict[str, object]] = {}
+        self.theme = "system"
+
+    def configure(self, name: str, **options: object) -> None:
+        self.configurations.setdefault(name, {}).update(options)
+
+    def map(self, name: str, **options: object) -> None:
+        self.maps.setdefault(name, {}).update(options)
+
+    def theme_use(self, name: str | None = None) -> str:
+        if name is not None:
+            self.theme = name
+        return self.theme
+
+
+class FakeTk:
+    def __init__(self) -> None:
+        self.scaling = 1.3333333333
+
+    def call(self, *args: object) -> float:
+        if args[:2] != ("tk", "scaling"):
+            return self.scaling
+        if len(args) == 3:
+            self.scaling = float(args[2])
+        return self.scaling
+
 
 class FakeToolkit:
     def __init__(self) -> None:
         self.widgets: list[FakeWidget] = []
         self.root: FakeRoot | None = None
+        self.focused_widget: FakeWidget | None = None
+        self.style = FakeStyle()
         self.filedialog = SimpleNamespace(askdirectory=lambda **unused: "")
+        self.ttk = self
 
     def Tk(self) -> "FakeRoot":
         self.root = FakeRoot()
@@ -81,9 +188,11 @@ class FakeToolkit:
         return FakeVariable(value)
 
     def _widget(
-        self, kind: str, unused_parent: object, **options: object
+        self, kind: str, parent: object, **options: object
     ) -> FakeWidget:
-        widget = FakeWidget(kind, options)
+        if isinstance(parent, FakeRoot):
+            self.root = parent
+        widget = FakeWidget(kind, options, self)
         self.widgets.append(widget)
         return widget
 
@@ -92,6 +201,9 @@ class FakeToolkit:
 
     def Label(self, parent: object, **options: object) -> FakeWidget:
         return self._widget("Label", parent, **options)
+
+    def LabelFrame(self, parent: object, **options: object) -> FakeWidget:
+        return self._widget("LabelFrame", parent, **options)
 
     def Entry(self, parent: object, **options: object) -> FakeWidget:
         return self._widget("Entry", parent, **options)
@@ -102,6 +214,21 @@ class FakeToolkit:
     def Text(self, parent: object, **options: object) -> FakeWidget:
         return self._widget("Text", parent, **options)
 
+    def Scrollbar(self, parent: object, **options: object) -> FakeWidget:
+        return self._widget("Scrollbar", parent, **options)
+
+    def Progressbar(self, parent: object, **options: object) -> FakeWidget:
+        return self._widget("Progressbar", parent, **options)
+
+    def Combobox(self, parent: object, **options: object) -> FakeWidget:
+        return self._widget("Combobox", parent, **options)
+
+    def Separator(self, parent: object, **options: object) -> FakeWidget:
+        return self._widget("Separator", parent, **options)
+
+    def Style(self, unused_root: object = None) -> FakeStyle:
+        return self.style
+
     def find(self, kind: str, text: str | None = None) -> FakeWidget:
         return next(
             widget
@@ -110,13 +237,28 @@ class FakeToolkit:
             and (text is None or widget.options.get("text") == text)
         )
 
+    def label_texts(self) -> list[str]:
+        return [
+            str(widget.options.get("text", ""))
+            for widget in self.widgets
+            if widget.kind in {"Label", "LabelFrame"}
+        ]
+
 
 class FakeRoot:
     def __init__(self) -> None:
         self.window_title = ""
+        self.window_geometry = ""
+        self.options: dict[str, object] = {}
         self.callbacks: Queue[object] = Queue()
         self.mainloop_calls = 0
         self.protocols: dict[str, object] = {}
+        self.bindings: dict[str, object] = {}
+        self.columns: dict[int, int] = {}
+        self.rows: dict[int, int] = {}
+        self.clipboard = ""
+        self.focused_widget: FakeWidget | None = None
+        self.tk = FakeTk()
         self.destroyed = False
 
     def title(self, value: str) -> None:
@@ -124,6 +266,32 @@ class FakeRoot:
 
     def minsize(self, unused_width: int, unused_height: int) -> None:
         return None
+
+    def geometry(self, value: str) -> None:
+        self.window_geometry = value
+
+    def configure(self, **options: object) -> None:
+        self.options.update(options)
+
+    config = configure
+
+    def bind(self, sequence: str, callback: object) -> None:
+        self.bindings[sequence] = callback
+
+    def columnconfigure(self, column: int, weight: int = 0, **unused: object) -> None:
+        self.columns[column] = weight
+
+    def rowconfigure(self, row: int, weight: int = 0, **unused: object) -> None:
+        self.rows[row] = weight
+
+    def clipboard_clear(self) -> None:
+        self.clipboard = ""
+
+    def clipboard_append(self, text: str) -> None:
+        self.clipboard += text
+
+    def focus_get(self) -> FakeWidget | None:
+        return self.focused_widget
 
     def after(self, unused_delay: int, callback: object) -> None:
         self.callbacks.put(callback)
@@ -384,46 +552,80 @@ class ChatMPDWindowTest(unittest.TestCase):
         close()
         self.assertTrue(root.destroyed)
 
-    def test_folder_task_and_start_controls_render_the_finished_result(self) -> None:
+    def test_builds_local_private_assistant_workspace_and_selects_project(self) -> None:
         toolkit = FakeToolkit()
         root = FakeRoot()
+        window = ChatMPDWindow(
+            root,
+            lambda unused_workspace, unused_task: successful_outcome(),
+            toolkit=toolkit,
+            choose_directory=lambda: "C:/project",
+        )
+
+        self.assertEqual(root.window_title, "ChatMPD — Local project assistant")
+        self.assertEqual(root.window_geometry, "1100x760")
+        toolkit.find("Label", "Local · Private")
+        toolkit.find("Button", "Choose project")
+        toolkit.find("Button", "Start task")
+        toolkit.find("Button", "Help")
+        self.assertTrue(
+            any("Describe the result you want" in text for text in toolkit.label_texts())
+        )
+        self.assertTrue(any("No cloud model" in text for text in toolkit.label_texts()))
+
+        toolkit.find("Button", "Choose project").invoke()
+        workspace_entry = toolkit.find("Entry")
+        self.assertEqual(workspace_entry.options["textvariable"].get(), "C:/project")
+        self.assertEqual(window._workspace.get(), "C:/project")
+
+    def test_renders_honest_working_and_structured_completed_timeline(self) -> None:
+        toolkit = FakeToolkit()
+        root = FakeRoot()
+        release_runner = Event()
         runner_started = Event()
 
         def runner(workspace: Path, task: str) -> SimpleNamespace:
             self.assertEqual(workspace, Path("C:/project"))
             self.assertEqual(task, "Repair the calculator")
             runner_started.set()
+            release_runner.wait(2)
             return successful_outcome()
 
-        ChatMPDWindow(
+        window = ChatMPDWindow(
             root,
             runner,
             toolkit=toolkit,
             choose_directory=lambda: "C:/project",
         )
-
-        self.assertEqual(root.window_title, "ChatMPD")
-        toolkit.find("Button", "Choose folder").invoke()
-        workspace_entry = toolkit.find("Entry")
-        self.assertEqual(workspace_entry.options["textvariable"].get(), "C:/project")
-
-        task_box, result_box = [
-            widget for widget in toolkit.widgets if widget.kind == "Text"
-        ]
-        task_box.insert("1.0", "Repair the calculator")
-        start_button = toolkit.find("Button", "Start ChatMPD")
+        window._workspace.set("C:/project")
+        window._task_box.insert("1.0", "Repair the calculator")
+        start_button = toolkit.find("Button", "Start task")
         start_button.invoke()
 
         self.assertTrue(runner_started.wait(1))
+        self.assertIn("YOU ASKED", window._timeline.text)
+        self.assertIn("Repair the calculator", window._timeline.text)
+        self.assertIn("CHATMPD IS WORKING LOCALLY", window._timeline.text)
+        self.assertGreaterEqual(window._progress.start_calls, 1)
+        self.assertEqual(start_button.options["state"], "disabled")
+
+        release_runner.set()
         root.callbacks.get(timeout=2)()
 
-        status_variable = next(
-            widget.options["textvariable"]
-            for widget in toolkit.widgets
-            if widget.kind == "Label" and "textvariable" in widget.options
+        self.assertIn("CHECKS PASSED", window._timeline.text)
+        self.assertIn("CHANGED FILES", window._timeline.text)
+        self.assertIn("calculator.py", window._timeline.text)
+        self.assertIn("VERIFICATION", window._timeline.text)
+        self.assertIn(
+            "C:\\project\\.chatmpd\\runs\\1\\run.json".casefold(),
+            window._timeline.text.casefold(),
         )
-        self.assertEqual(status_variable.get(), "Task finished successfully.")
-        self.assertIn("Changed files:\n- calculator.py", result_box.text)
+        self.assertGreaterEqual(window._progress.stop_calls, 1)
+        self.assertEqual(toolkit.find("Button", "Copy result").options["state"], "normal")
+        self.assertEqual(
+            toolkit.find("Button", "Open run folder").options["state"], "normal"
+        )
+        self.assertEqual(toolkit.find("Button", "New task").options["state"], "normal")
         self.assertEqual(start_button.options["state"], "normal")
 
     def test_launch_gui_builds_the_window_and_enters_the_desktop_event_loop(
@@ -436,8 +638,11 @@ class ChatMPDWindowTest(unittest.TestCase):
 
         self.assertIsNotNone(toolkit.root)
         self.assertEqual(toolkit.root.mainloop_calls, 1)
-        self.assertEqual(toolkit.root.window_title, "ChatMPD")
-        toolkit.find("Button", "Start ChatMPD")
+        self.assertEqual(
+            toolkit.root.window_title,
+            "ChatMPD — Local project assistant",
+        )
+        toolkit.find("Button", "Start task")
 
 
 if __name__ == "__main__":
