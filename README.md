@@ -1,4 +1,4 @@
-# ChatMPD 0.3.2
+# ChatMPD 0.3.3
 
 ChatMPD is a local-first autonomous Windows assistant with a modern WebView2 conversation UI, persistent chats and memory, extensible skills/plugins/tools, local model routing, verified coding, ESO/Vortex specialists, local media, mobile access, workflows/automation, and sanitized sharing.
 
@@ -51,7 +51,7 @@ Examples:
 Routing, memory retrieval, model/tool choice, specialist selection, and verification happen below the same conversation interface.
 ## Safety and recovery
 
-Coding changes stay inside the selected project and use an exact approved verification command in an offline WSL/bubblewrap snapshot. Host-level critical actions—boot/firmware, disks/partitions, security controls, credentials, accounts/permissions, and similarly destructive changes—remain confirmation gates. Windows Firewall/security settings are never silently weakened.
+Coding changes stay inside the selected project and use an exact approved verification command in an offline WSL/bubblewrap snapshot. Host-level critical actionsâ€”boot/firmware, disks/partitions, security controls, credentials, accounts/permissions, and similarly destructive changesâ€”remain confirmation gates. Windows Firewall/security settings are never silently weakened.
 
 Recovery snapshots cover managed reversible file changes. The activity log stores visible evidence/status, not private chain-of-thought. Secrets for optional connectors are stored separately with Windows user protection rather than in prompts or ordinary memory.
 
@@ -76,7 +76,7 @@ ChatMPD is licensed under the [MIT License](LICENSE). Third-party software, serv
 
 ## Performance Center
 
-Control Center → **Performance** analyzes Vader without changing it, scores Gaming, AI, Balanced, and overall headroom, identifies only active bottlenecks, and shows bounded CPU/RAM/commit/pagefile/disk-queue/process-I/O/GPU/VRAM/power evidence. Reports are retained locally so optimizations can be compared against a before/after baseline.
+Control Center â†’ **Performance** analyzes Vader without changing it, scores Gaming, AI, Balanced, and overall headroom, identifies only active bottlenecks, and shows bounded CPU/RAM/commit/pagefile/disk-queue/process-I/O/GPU/VRAM/power evidence. Reports are retained locally so optimizations can be compared against a before/after baseline.
 
 Available modes are **Analyze only**, **Balanced**, **Gaming**, and **AI / ChatMPD**. Automatic changes are deliberately limited to reversible Windows power-plan selection and ChatMPD-owned runtime coordination. Adaptive mode can protect ESO when `eso64.exe` appears and restore the selected base mode after the game exits.
 
