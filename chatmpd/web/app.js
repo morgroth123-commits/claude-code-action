@@ -1,16 +1,20 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
+const MOBILE_TOKEN_KEY = "chatmpd-mobile-token";
 const state = {
   conversations: [],
   activeConversation: null,
   activeJob: null,
   workspace: "",
   mobile: null,
+  clientMode: "desktop",
 };
 
 async function api(path, options = {}) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  const token = localStorage.getItem(MOBILE_TOKEN_KEY) || "";
+  if (state.clientMode === "mobile" && token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(path, { ...options, headers });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
@@ -35,6 +39,26 @@ function setTheme(theme) {
   const choice = ["system", "light", "dark"].includes(theme) ? theme : "system";
   document.documentElement.dataset.theme = choice;
   localStorage.setItem("chatmpd-theme", choice);
+}
+
+async function pairDevice() {
+  const code = $("mobile-pair-code").value.trim();
+  const deviceName = $("mobile-device-name").value.trim() || "My phone";
+  try {
+    const credential = await api("/api/pair", {
+      method: "POST",
+      body: JSON.stringify({ code, device_name: deviceName }),
+    });
+    localStorage.setItem(MOBILE_TOKEN_KEY, credential.token);
+    $("mobile-pair-screen").hidden = true;
+    $("app-shell").hidden = false;
+    $("pair-error").textContent = "";
+    await loadConversations();
+    if (state.conversations.length) await openConversation(state.conversations[0].conversation_id);
+    else await createConversation();
+  } catch (error) {
+    $("pair-error").textContent = error.message;
+  }
 }
 
 function setBusy(busy, capability = "") {
@@ -264,6 +288,27 @@ function autoGrowComposer() {
   prompt.style.height = `${Math.min(prompt.scrollHeight, 190)}px`;
 }
 
+async function submitMobileCommand(text) {
+  const payload = { text, conversation_id: state.activeConversation };
+  if (state.workspace) payload.workspace = state.workspace;
+  state.activeJob = "mobile-request";
+  setBusy(true, "Working on Vader");
+  try {
+    const result = await api("/api/command", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    state.activeJob = null;
+    setBusy(false, result.capability || "Ready");
+    await openConversation(state.activeConversation);
+    renderResult(result);
+  } catch (error) {
+    state.activeJob = null;
+    setBusy(false, "Needs attention");
+    appendMessage("assistant", `I couldn't complete that task: ${error.message}`);
+  }
+}
+
 async function submitPrompt(event) {
   if (event) event.preventDefault();
   if (state.activeJob) return;
@@ -274,6 +319,10 @@ async function submitPrompt(event) {
   appendMessage("user", text);
   $("prompt").value = "";
   autoGrowComposer();
+  if (state.clientMode === "mobile") {
+    await submitMobileCommand(text);
+    return;
+  }
   setBusy(true, "Routing locally");
   try {
     const payload = { text, conversation_id: state.activeConversation };
@@ -436,6 +485,7 @@ async function refreshMobileStatus() {
 }
 
 function bindEvents() {
+  $("pair-device-button").addEventListener("click", pairDevice);
   $("new-chat").addEventListener("click", createConversation);
   $("composer").addEventListener("submit", submitPrompt);
   $("stop").addEventListener("click", cancelActiveJob);
@@ -470,9 +520,33 @@ async function boot() {
   bindEvents();
   autoGrowComposer();
   try {
+    const client = await api("/api/client");
+    state.clientMode = client.mode === "mobile" ? "mobile" : "desktop";
+    const query = new URLSearchParams(window.location.search);
+    const pairingCode = query.get("pair") || "";
+    if (pairingCode) $("mobile-pair-code").value = pairingCode;
+    if (state.clientMode === "mobile") {
+      $("mobile-access").hidden = true;
+      const token = localStorage.getItem(MOBILE_TOKEN_KEY) || "";
+      if (!token) {
+        $("mobile-pair-screen").hidden = false;
+        $("app-shell").hidden = true;
+        return;
+      }
+      await api("/api/status");
+    }
+    $("mobile-pair-screen").hidden = true;
+    $("app-shell").hidden = false;
     await loadConversations();
     if (state.conversations.length) await openConversation(state.conversations[0].conversation_id);
   } catch (error) {
+    if (state.clientMode === "mobile") {
+      localStorage.removeItem(MOBILE_TOKEN_KEY);
+      $("mobile-pair-screen").hidden = false;
+      $("app-shell").hidden = true;
+      $("pair-error").textContent = error.message;
+      return;
+    }
     $("runtime-label").textContent = `Local UI error: ${error.message}`;
     $("runtime-dot").style.background = "#c85151";
   }

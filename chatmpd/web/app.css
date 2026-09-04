@@ -213,3 +213,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 }
 .action-popover button:hover { background: var(--hover); }
 .qr-box img { max-width: 100%; height: auto; image-rendering: pixelated; }
+
+.pair-screen { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: var(--bg); }
+.pair-card { width: min(100%, 420px); display: grid; gap: 14px; border: 1px solid var(--border); border-radius: 20px; padding: 24px; background: var(--surface); box-shadow: var(--shadow); }
+.pair-card h1 { margin: 0; font-size: 24px; }
+.pair-card p { margin: 0; color: var(--muted); line-height: 1.5; }
+.pair-card label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.pair-card input { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); padding: 11px; }
+.pair-icon { width: 54px; height: 54px; border-radius: 14px; }
+.pair-error { min-height: 20px; color: #c85151 !important; font-size: 12px; }
+body.mobile-client #mobile-access { display: none; }

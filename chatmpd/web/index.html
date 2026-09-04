@@ -9,6 +9,17 @@
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+<section id="mobile-pair-screen" class="pair-screen" hidden aria-labelledby="pair-screen-title">
+  <div class="pair-card">
+    <img src="/chatmpd-192.png" alt="" class="pair-icon">
+    <h1 id="pair-screen-title">Connect to Vader</h1>
+    <p>Pair this device once. Your chats and model work stay on Vader.</p>
+    <label>Device name<input id="mobile-device-name" maxlength="80" value="My phone" autocomplete="nickname"></label>
+    <label>Pairing code<input id="mobile-pair-code" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="000000"></label>
+    <button id="pair-device-button" class="primary-button" type="button">Pair this device</button>
+    <p id="pair-error" class="pair-error" role="alert"></p>
+  </div>
+</section>
 <div class="app-shell" id="app-shell">
   <aside id="sidebar" class="sidebar" aria-label="Conversation navigation">
     <div class="sidebar-top">

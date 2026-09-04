@@ -149,6 +149,22 @@ class WebServiceTest(unittest.TestCase):
         self.orchestrator.release.set()
         self.assertEqual(self._wait_job(first["job_id"])["status"], "completed")
 
+    def test_mobile_start_returns_copyable_single_use_setup_and_qr(self) -> None:
+        status, session = self._request("POST", "/api/mobile/start", {})
+        self.assertEqual(status, 200)
+        self.assertTrue(session["active"])
+        self.assertIn("?pair=", session["setup_url"])
+        self.assertIn(session["pairing_code"], session["setup_url"])
+        self.assertTrue(session["address"].startswith("http://"))
+        self.assertTrue(session["qr_url"].startswith("data:image/svg+xml;base64,"))
+
+        status, current = self._request("GET", "/api/mobile/status")
+        self.assertEqual(status, 200)
+        self.assertTrue(current["active"])
+        status, stopped = self._request("POST", "/api/mobile/stop", {})
+        self.assertEqual(status, 200)
+        self.assertFalse(stopped["active"])
+
     def test_cancelled_job_never_reports_success(self) -> None:
         self.orchestrator.block = True
         conversation = self.library.create()

@@ -6,13 +6,14 @@ import ipaddress
 import json
 import mimetypes
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
+from .conversation_library import ConversationLibrary
 from .mobile_auth import DeviceCredentialStore
 
 
@@ -56,11 +57,15 @@ class MobileGateway:
         *,
         command_handler: Callable[..., Any],
         credential_store: DeviceCredentialStore | None = None,
+        conversations: ConversationLibrary | None = None,
+        assets_root: Path | None = None,
         status_handler: Callable[[], Any] | None = None,
         config: GatewayConfig | None = None,
     ) -> None:
         self.command_handler = command_handler
         self.credentials = credential_store or DeviceCredentialStore()
+        self.conversations = conversations
+        self.assets_root = None if assets_root is None else Path(assets_root)
         self.status_handler = status_handler or (lambda: {"mode": "ready"})
         self.config = config or GatewayConfig()
         self._server: ThreadingHTTPServer | None = None
@@ -93,6 +98,9 @@ class MobileGateway:
             def do_POST(self) -> None:  # noqa: N802
                 owner._handle(self)
 
+            def do_DELETE(self) -> None:  # noqa: N802
+                owner._handle(self)
+
         self._server = ThreadingHTTPServer((self.config.host, self.config.port), Handler)
         self._thread = Thread(
             target=self._server.serve_forever,
@@ -116,9 +124,16 @@ class MobileGateway:
         if not _private_client(request.client_address[0]):
             self._json(request, 403, {"error": "private network only"})
             return
-        path = urlsplit(request.path).path
-        if request.command == "GET" and path == "/":
-            self._bytes(request, 200, _INDEX_HTML.encode("utf-8"), "text/html; charset=utf-8")
+        parsed = urlsplit(request.path)
+        path = parsed.path
+        if request.command == "GET" and path in {"/", "/index.html"}:
+            if self.assets_root is not None:
+                self._serve_web_asset(request, "index.html")
+            else:
+                self._bytes(request, 200, _INDEX_HTML.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if request.command == "GET" and path in {"/app.css", "/app.js", "/chatmpd-192.png", "/chatmpd-512.png"}:
+            self._serve_web_asset(request, path.lstrip("/"))
             return
         if request.command == "GET" and path == "/manifest.webmanifest":
             self._json(request, 200, _MANIFEST)
@@ -130,6 +145,9 @@ class MobileGateway:
         if request.command == "GET" and path == "/service-worker.js":
             self._bytes(request, 200, _SERVICE_WORKER.encode("utf-8"), "text/javascript; charset=utf-8")
             return
+        if request.command == "GET" and path == "/api/client":
+            self._json(request, 200, {"mode": "mobile"})
+            return
         if request.command == "POST" and path == "/api/pair":
             self._pair(request)
             return
@@ -139,10 +157,69 @@ class MobileGateway:
         if request.command == "GET" and path == "/api/status":
             self._json(request, 200, self.status_handler())
             return
+        if path == "/api/conversations" and self.conversations is not None:
+            self._conversation_collection(request, parsed)
+            return
+        segments = [part for part in path.split("/") if part]
+        if segments[:2] == ["api", "conversations"] and self.conversations is not None:
+            self._conversation_item(request, segments[2:])
+            return
         if request.command == "POST" and path == "/api/command":
             self._command(request)
             return
         self._json(request, 404, {"error": "not found"})
+
+    def _conversation_collection(self, request: BaseHTTPRequestHandler, parsed: Any) -> None:
+        assert self.conversations is not None
+        if request.command == "GET":
+            query = parse_qs(parsed.query).get("q", [""])[0]
+            items = self.conversations.search(query) if query else self.conversations.list()
+            self._json(request, 200, [asdict(item) for item in items])
+            return
+        if request.command == "POST":
+            try:
+                payload = self._read_json(request)
+                document = self.conversations.create(payload.get("messages"))
+            except (OSError, ValueError) as error:
+                self._json(request, 400, {"error": str(error)[:300]})
+                return
+            self._json(request, 201, asdict(document))
+            return
+        self._json(request, 404, {"error": "not found"})
+
+    def _conversation_item(self, request: BaseHTTPRequestHandler, segments: list[str]) -> None:
+        assert self.conversations is not None
+        if not segments:
+            self._json(request, 404, {"error": "conversation id required"})
+            return
+        conversation_id = segments[0]
+        try:
+            if len(segments) == 1 and request.command == "GET":
+                document = self.conversations.load(conversation_id)
+                self._json(request, 200, asdict(document))
+                return
+            if len(segments) == 1 and request.command == "DELETE":
+                deleted = self.conversations.delete(conversation_id)
+                self._json(request, 200 if deleted else 404, {"deleted": deleted})
+                return
+            if len(segments) != 2 or request.command != "POST":
+                self._json(request, 404, {"error": "not found"})
+                return
+            payload = self._read_json(request)
+            action = segments[1]
+            if action == "rename":
+                document = self.conversations.rename(conversation_id, str(payload.get("title", "")))
+            elif action == "pin":
+                document = self.conversations.set_pinned(conversation_id, bool(payload.get("pinned")))
+            elif action == "branch":
+                count = payload.get("through_message_count")
+                document = self.conversations.branch(conversation_id, None if count is None else int(count))
+            else:
+                self._json(request, 404, {"error": "not found"})
+                return
+            self._json(request, 200, asdict(document))
+        except (OSError, ValueError, FileNotFoundError) as error:
+            self._json(request, 400, {"error": str(error)[:300]})
 
     def _pair(self, request: BaseHTTPRequestHandler) -> None:
         try:
@@ -171,10 +248,18 @@ class MobileGateway:
             if not text:
                 raise ValueError("Command text is required.")
             workspace = payload.get("workspace")
-            result = self.command_handler(
-                text,
-                None if workspace is None else str(workspace),
-            )
+            conversation_id = str(payload.get("conversation_id") or "").strip()
+            if conversation_id:
+                result = self.command_handler(
+                    text,
+                    None if workspace is None else str(workspace),
+                    conversation_id=conversation_id,
+                )
+            else:
+                result = self.command_handler(
+                    text,
+                    None if workspace is None else str(workspace),
+                )
         except (ValueError, TypeError) as error:
             self._json(request, 400, {"error": str(error)})
             return
@@ -205,6 +290,24 @@ class MobileGateway:
         if not isinstance(payload, dict):
             raise ValueError("Request body must be a JSON object.")
         return payload
+
+    def _serve_web_asset(self, request: BaseHTTPRequestHandler, name: str) -> None:
+        allowed = {"index.html", "app.css", "app.js", "chatmpd-192.png", "chatmpd-512.png"}
+        if name not in allowed:
+            self._json(request, 404, {"error": "asset unavailable"})
+            return
+        if self.assets_root is None:
+            if name.startswith("chatmpd-"):
+                self._serve_asset(request, name)
+            else:
+                self._json(request, 404, {"error": "asset unavailable"})
+            return
+        path = self.assets_root / name
+        if not path.is_file():
+            self._json(request, 404, {"error": "asset unavailable"})
+            return
+        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        self._bytes(request, 200, path.read_bytes(), content_type)
 
     def _serve_asset(self, request: BaseHTTPRequestHandler, name: str) -> None:
         path = _asset_path(name)

@@ -78,6 +78,11 @@ class MobileGatewayTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), {"mode": "ready"})
 
+    def test_exposes_public_mobile_client_mode_before_pairing(self) -> None:
+        status, body, _headers = self._request("GET", "/api/client")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["mode"], "mobile")
+
     def test_serves_installable_pwa_shell_and_manifest(self) -> None:
         status, body, _headers = self._request("GET", "/")
         self.assertEqual(status, 200)

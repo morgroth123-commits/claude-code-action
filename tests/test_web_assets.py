@@ -15,7 +15,7 @@ class WebAssetTest(unittest.TestCase):
             'id="sidebar"', 'id="new-chat"', 'id="conversation-search"',
             'id="conversation-list"', 'id="transcript"', 'id="composer"',
             'id="prompt"', 'id="send"', 'id="artifact-pane"',
-            'id="mobile-dialog"', 'aria-live="polite"',
+            'id="mobile-dialog"', 'id="mobile-pair-screen"', 'aria-live="polite"',
         ):
             self.assertIn(required, page)
         self.assertIn("ChatMPD", page)
@@ -38,11 +38,13 @@ class WebAssetTest(unittest.TestCase):
             "loadConversations", "openConversation", "createConversation",
             "renameConversation", "togglePin", "branchConversation",
             "deleteConversation", "submitPrompt", "cancelActiveJob",
-            "renderRichText", "copyText", "setTheme",
+            "renderRichText", "copyText", "setTheme", "pairDevice",
         ):
             self.assertIn(required, script)
         self.assertIn("event.shiftKey", script)
         self.assertIn("event.key === 'Enter'", script)
+        self.assertIn("URLSearchParams", script)
+        self.assertIn("chatmpd-mobile-token", script)
 
 
 if __name__ == "__main__":

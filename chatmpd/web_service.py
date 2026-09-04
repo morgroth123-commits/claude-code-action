@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import ipaddress
 import json
 import mimetypes
+import socket
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,6 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from .conversation_library import ConversationLibrary
+from .mobile_gateway import GatewayConfig, MobileGateway
 from .orchestrator import ChatMPDOrchestrator, CommandResult
 
 
@@ -50,6 +54,8 @@ class WebAppService:
         self._lock = RLock()
         self._jobs: dict[str, _Job] = {}
         self._active_job_id: str | None = None
+        self._mobile: MobileGateway | None = None
+        self._mobile_session: dict[str, Any] | None = None
 
     @property
     def port(self) -> int:
@@ -91,6 +97,7 @@ class WebAppService:
         self._thread.start()
 
     def stop(self) -> None:
+        self._stop_mobile_gateway()
         server, thread = self._server, self._thread
         self._server = None
         self._thread = None
@@ -113,6 +120,19 @@ class WebAppService:
             return
         if request.command == "GET" and path in {"/app.css", "/app.js", "/chatmpd-192.png", "/chatmpd-512.png"}:
             self._serve_asset(request, path.lstrip("/"))
+            return
+        if request.command == "GET" and path == "/api/client":
+            self._json(request, 200, {"mode": "desktop"})
+            return
+        if path == "/api/mobile/start" and request.command == "POST":
+            self._start_mobile_gateway(request)
+            return
+        if path == "/api/mobile/status" and request.command == "GET":
+            self._json(request, 200, self._mobile_status())
+            return
+        if path == "/api/mobile/stop" and request.command == "POST":
+            self._stop_mobile_gateway()
+            self._json(request, 200, {"active": False})
             return
         if path == "/api/conversations" and request.command == "GET":
             query = parse_qs(parsed.query).get("q", [""])[0]
@@ -278,6 +298,90 @@ class WebAppService:
         except Exception:
             pass
         self._json(request, 202, self._public_job(job))
+
+    def _mobile_command(
+        self, text: str, workspace: str | None = None, *, conversation_id: str | None = None
+    ) -> dict[str, Any]:
+        target = str(conversation_id or "").strip()
+        if target:
+            self.conversations.load(target)
+            loader = getattr(self.orchestrator.assistant, "load_conversation", None)
+            if callable(loader):
+                loader(target)
+        result = self.orchestrator.command(text, workspace=workspace)
+        if target:
+            document = self.conversations.load(target)
+            pair = [
+                {"role": "user", "content": text},
+                {"role": "assistant", "content": result.message},
+            ]
+            messages = list(document.messages)
+            if len(messages) < 2 or messages[-2:] != pair:
+                messages.extend(pair)
+                self.conversations.save_messages(target, messages)
+        return result.as_dict()
+
+    def _start_mobile_gateway(self, request: BaseHTTPRequestHandler) -> None:
+        if self._mobile is None:
+            gateway = MobileGateway(
+                command_handler=self._mobile_command,
+                conversations=self.conversations,
+                assets_root=self.assets_root,
+                status_handler=lambda: {"mode": "ready"},
+                config=GatewayConfig(host="0.0.0.0", port=0),
+            )
+            gateway.start()
+            self._mobile = gateway
+        code = self._mobile.begin_pairing()
+        address = self._lan_mobile_address(self._mobile.port)
+        setup_url = f"{address}?pair={code}"
+        self._mobile_session = {
+            "active": True,
+            "address": address,
+            "pairing_code": code,
+            "setup_url": setup_url,
+            "qr_url": self._qr_data_url(setup_url),
+        }
+        self._json(request, 200, self._mobile_session)
+
+    def _mobile_status(self) -> dict[str, Any]:
+        if self._mobile is None or self._mobile_session is None:
+            return {"active": False}
+        return dict(self._mobile_session)
+
+    def _stop_mobile_gateway(self) -> None:
+        gateway = self._mobile
+        self._mobile = None
+        self._mobile_session = None
+        if gateway is not None:
+            gateway.stop()
+
+    @staticmethod
+    def _lan_mobile_address(port: int) -> str:
+        candidates: list[str] = []
+        try:
+            for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM):
+                address = str(item[4][0])
+                parsed = ipaddress.ip_address(address)
+                if parsed.is_private and not parsed.is_loopback:
+                    candidates.append(address)
+        except (OSError, ValueError, IndexError, TypeError):
+            pass
+        host = candidates[0] if candidates else "127.0.0.1"
+        return f"http://{host}:{int(port)}/"
+
+    @staticmethod
+    def _qr_data_url(value: str) -> str:
+        try:
+            import qrcode
+            import qrcode.image.svg
+            image = qrcode.make(value, image_factory=qrcode.image.svg.SvgPathImage)
+            stream = io.BytesIO()
+            image.save(stream)
+            encoded = base64.b64encode(stream.getvalue()).decode("ascii")
+            return f"data:image/svg+xml;base64,{encoded}"
+        except Exception:
+            return ""
 
     @staticmethod
     def _public_job(job: _Job) -> dict[str, Any]:
