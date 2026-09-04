@@ -37,3 +37,13 @@ class ControlCenterAssetTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CivitaiControlCenterAssetTest(unittest.TestCase):
+    def test_skills_tools_surface_exposes_civitai_mcp_controls(self) -> None:
+        script = (WEB / "app.js").read_text(encoding="utf-8")
+        self.assertIn("Civitai", script)
+        self.assertIn("/api/platform/civitai", script)
+        self.assertIn("civitai-api-key", script)
+        self.assertIn("List Civitai tools", script)
+        self.assertNotIn("innerHTML", script)

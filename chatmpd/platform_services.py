@@ -11,6 +11,7 @@ from .activity import ActivityLog
 from .attachments import AttachmentStore
 from .automation_engine import AutomationScheduler, AutomationStore
 from .capabilities import CapabilityDescriptor, CapabilityRegistry
+from .civitai import CivitaiMCP
 from .desktop_control import DesktopController
 from .exporter import PackExporter
 from .extension_wizard import ExtensionWizard
@@ -81,6 +82,7 @@ class PlatformServices:
     lmstudio_installation: Any | None
     esoui: EsoUiCatalog
     nexus: NexusModsCatalog
+    civitai: CivitaiMCP
     performance: PerformanceCenter
     automation_scheduler: AutomationScheduler | None = None
 
@@ -171,6 +173,7 @@ class PlatformServices:
             "vision": self.vision.health(),
             "esoui": self.esoui.policy(),
             "nexus": {"api": self.nexus.api_root, "site": self.nexus.site_root, "api_key_configured": "nexus-api-key" in self.secrets.names()},
+            "civitai": self.civitai.status(),
         }
 
 def build_platform_services(
@@ -211,6 +214,7 @@ def build_platform_services(
     registry.register(CapabilityDescriptor("desktop", "Desktop control", "Permission-gated local computer input.", enabled=False, risk="critical"))
     registry.register(CapabilityDescriptor("esoui", "ESOUI catalog", "Canonical public ESO addon repository used with Minion local state."))
     registry.register(CapabilityDescriptor("nexus", "Nexus Mods", "Canonical Nexus/Vortex repository integration with optional API key.", permissions=("network",)))
+    registry.register(CapabilityDescriptor("civitai", "Civitai MCP", "Remote Streamable HTTP MCP for Civitai browse and permission-gated account actions.", permissions=("network",)))
 
     detected = hardware_probe() if hardware_probe is not None else detect_hardware()
     if detected is None:
@@ -221,6 +225,13 @@ def build_platform_services(
     attachments = AttachmentStore(database, paths.attachments)
     permissions = PermissionProfileStore(database)
     secrets = SecretsVault(database)
+    civitai = CivitaiMCP(secrets=secrets)
+    registry.replace(
+        registry.get("civitai"),
+        lambda tool_name, arguments, confirmed=False: civitai.call(
+            str(tool_name), dict(arguments), confirmed=bool(confirmed)
+        ),
+    )
     activity = ActivityLog(database)
     performance_store = PerformanceStore(database)
     performance_analyzer = PerformanceAnalyzer(performance_store, evidence_probe=performance_probe)
@@ -265,5 +276,6 @@ def build_platform_services(
         lmstudio_installation=installation,
         esoui=esoui,
         nexus=nexus,
+        civitai=civitai,
         performance=performance,
     )

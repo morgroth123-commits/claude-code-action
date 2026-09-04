@@ -68,3 +68,38 @@ class PlatformServicesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CivitaiPlatformIntegrationTest(unittest.TestCase):
+    def test_platform_registers_civitai_without_requiring_a_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            services = build_platform_services(
+                paths=PlatformPaths(Path(directory)),
+                model_registry=ModelRegistry(()),
+                hardware_probe=lambda: None,
+            )
+            ids = {item.capability_id for item in services.capabilities.list()}
+            self.assertIn("civitai", ids)
+            status = services.summary()["civitai"]
+            self.assertEqual(status["endpoint"], "https://mcp.civitai.com/mcp")
+            self.assertTrue(status["browse_anonymous"])
+            self.assertFalse(status["api_key_configured"])
+            services.close()
+
+
+class CivitaiCapabilityInvocationTest(unittest.TestCase):
+    def test_registry_invokes_civitai_read_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            services = build_platform_services(
+                paths=PlatformPaths(Path(directory)),
+                model_registry=ModelRegistry(()), hardware_probe=lambda: None,
+            )
+            class Runner:
+                def list_mcp_http_tools(self, endpoint, *, bearer_token=None):
+                    return ({"name": "search_models", "annotations": {"readOnlyHint": True}},)
+                def call_mcp_http(self, endpoint, tool_name, arguments, *, bearer_token=None):
+                    return {"content": [{"type": "text", "text": arguments["query"]}]}
+            services.civitai.runner = Runner()
+            result = services.capabilities.invoke("civitai", "search_models", {"query": "flux"})
+            self.assertEqual(result["content"][0]["text"], "flux")
+            services.close()

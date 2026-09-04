@@ -116,3 +116,29 @@ class WebPlatformTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CivitaiWebPlatformTest(WebPlatformTest):
+    def setUp(self) -> None:
+        super().setUp()
+        class FakeCivitai:
+            def status(self):
+                return {"endpoint": "https://mcp.civitai.com/mcp", "api_key_configured": False, "browse_anonymous": True}
+            def list_tools(self):
+                return ({"name": "search_models", "annotations": {"readOnlyHint": True}},)
+            def call(self, name, arguments, confirmed=False):
+                return {"content": [{"type": "text", "text": f"{name}:{arguments.get('query', '')}"}]}
+        self.services.civitai = FakeCivitai()
+
+    def test_civitai_status_tools_and_call_surfaces(self) -> None:
+        status, info = self.request("GET", "/api/platform/civitai")
+        self.assertEqual(status, 200)
+        self.assertTrue(info["browse_anonymous"])
+        status, tools = self.request("POST", "/api/platform/civitai/tools", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(tools["tools"][0]["name"], "search_models")
+        status, result = self.request("POST", "/api/platform/civitai/call", {
+            "tool_name": "search_models", "arguments": {"query": "flux"}
+        })
+        self.assertEqual(status, 200)
+        self.assertIn("search_models:flux", result["content"][0]["text"])

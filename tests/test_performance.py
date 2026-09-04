@@ -92,6 +92,7 @@ class PerformanceCenterTest(unittest.TestCase):
         self.assertEqual(center.history(), ("old",))
         self.assertFalse(center.status()["adaptive_enabled"])
         center.set_adaptive(True, base_mode="ai", start_thread=False)
+        self.assertEqual(optimizer.calls, ["ai"])
         self.assertEqual(center.tick_adaptive(), "ai")
         game["running"] = True
         self.assertEqual(center.tick_adaptive(), "gaming")
@@ -148,6 +149,13 @@ class VaderOptimizerTest(unittest.TestCase):
             restored = optimizer.restore()
             self.assertEqual(restored.mode, "restored")
             self.assertEqual(writes[-1], "baseline-guid")
+
+            current["guid"] = "new-user-plan"
+            optimizer.apply("gaming")
+            current["guid"] = HIGH_PERFORMANCE
+            optimizer.restore()
+            self.assertEqual(writes[-1], "new-user-plan")
+
     def test_adaptive_controller_only_changes_on_transitions(self) -> None:
         class FakeOptimizer:
             def __init__(self) -> None:

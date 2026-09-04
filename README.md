@@ -9,13 +9,14 @@ The normal interface is `ChatMPD.exe`. Desktop and phone use the same orchestrat
 - Persistent conversation history; New Chat never erases earlier chats.
 - Durable cross-chat memory plus local document/knowledge retrieval.
 - Control Center for Memory, Knowledge, Skills & Tools, Models, Workflows, Automations, Recovery, Prompt Guide, Diagnostics, and Sharing.
-- Skills from TOML + Markdown; bounded subprocess plugins; CLI, HTTP, and MCP stdio adapters.
+- Skills from TOML + Markdown; bounded subprocess plugins; CLI, HTTP, MCP stdio, and remote Streamable HTTP MCP adapters.
 - Capability packs and an extension wizard.
 - Hardware-aware local model inventory, benchmarks, and role overrides.
 - llama.cpp as Vader's proven primary runtime, plus LM Studio-compatible local integration and Bionic companion support.
 - Hardened autonomous coding with workspace-only tools, backups, and fresh WSL/bubblewrap verification.
 - ESO diagnostics/guarded repair using local Minion evidence and the public ESOUI catalog.
 - Read-only Vortex inventory plus Nexus Mods repository integration with optional authenticated API features.
+- Civitai platform MCP browsing is anonymous by default; optional account/write actions use a DPAPI-protected key and explicit confirmation.
 - Z-Image and LTX-Video through hidden loopback ComfyUI; FFmpeg assembly.
 - Local Windows TTS, optional local Whisper transcription, screenshots, local-only vision adapter, and disabled-by-default desktop control.
 - One-time mobile pairing with Copy setup link, QR, address/code fallbacks, and revocable device credentials.

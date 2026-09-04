@@ -348,6 +348,22 @@ class WebAppService:
                     services.bionic.open()
                     self._json(request, 200, {"opened": True})
                     return
+            if section == "civitai":
+                if request.command == "GET":
+                    self._json(request, 200, services.civitai.status())
+                    return
+                if request.command == "POST" and len(segments) == 2 and segments[1] == "tools":
+                    self._json(request, 200, {"tools": list(services.civitai.list_tools())})
+                    return
+                if request.command == "POST" and len(segments) == 2 and segments[1] == "call":
+                    payload = self._read_json(request)
+                    result = services.civitai.call(
+                        str(payload.get("tool_name", "")),
+                        dict(payload.get("arguments") or {}),
+                        confirmed=bool(payload.get("confirmed", False)),
+                    )
+                    self._json(request, 200, result)
+                    return
             if section == "mod-sources" and request.command == "GET":
                 self._json(request, 200, {
                     "esoui": services.esoui.policy(),

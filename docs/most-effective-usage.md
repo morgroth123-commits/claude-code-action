@@ -21,9 +21,11 @@ Durable memory is separate from chat history. Say `Remember that ...` for a fact
 Use Control Center → Knowledge to index local text, Markdown, code, CSV/JSON, PDF, DOCX, and XLSX files. Relevant memory and knowledge are retrieved into the model's system context for the current request without being duplicated into the visible transcript.
 ## Skills, plugins, tools, and packs
 
-Control Center → Skills & Tools lists built-in capabilities, portable Markdown/TOML skills, bounded subprocess plugins, CLI adapters, HTTP adapters, and MCP stdio tools. Extensions declare their permissions/risk/health and remain separate from ChatMPD's core process by default.
+Control Center → Skills & Tools lists built-in capabilities, portable Markdown/TOML skills, bounded subprocess plugins, CLI adapters, HTTP adapters, MCP stdio tools, and remote Streamable HTTP MCP tools. Extensions declare their permissions/risk/health and remain separate from ChatMPD's core process by default.
 
 Capability packs group related functions such as Developer, Research, Media, Modding, ESO, and Windows diagnostics. The extension wizard can create a new skill skeleton from a name, purpose, and capability id; the generated skill still inherits ChatMPD's permission and verification boundaries.
+
+Civitai is available in Skills & Tools as a remote MCP catalog. Browse/search tools work anonymously. Save an optional Civitai API key only through the protected connector control; posting, reacting, messaging, moderation, and other write actions remain explicit-confirmation operations.
 
 For ESO, ChatMPD treats the public ESOUI catalog as the canonical discovery source and Minion's local state as installed-addon evidence. It does not impersonate Minion's private API. For Vortex/modding, Nexus Mods is the canonical repository source; public data works without an account while authenticated API features are optional.
 

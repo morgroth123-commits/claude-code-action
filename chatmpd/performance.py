@@ -417,6 +417,8 @@ class VaderOptimizer:
                 raise PermissionError(decision.reason)
             self._power_setter(baseline)
         state["active_mode"] = "balanced"
+        state["baseline_guid"] = ""
+        state["baseline_name"] = ""
         self._write_state(state)
         result = self._result("restored", changed, baseline, current_guid, "Restored captured performance baseline.")
         self.activity.record("performance", result.message, details={
@@ -583,6 +585,7 @@ class PerformanceCenter:
             self.optimizer, workload_probe=self._workload_probe, base_mode=clean_base
         )
         self._adaptive_enabled = True
+        self.tick_adaptive()
         if start_thread and (self._thread is None or not self._thread.is_alive()):
             self._stop.clear()
             self._thread = Thread(

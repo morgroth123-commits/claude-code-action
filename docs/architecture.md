@@ -29,7 +29,7 @@ LM Studio support is additive. `LMStudioIntegration` discovers a normal `lms` CL
 
 ## Extensions and tools
 
-`CapabilityRegistry` is the searchable inventory for built-ins and extensions. `ExtensionManager` discovers portable TOML manifests and Markdown skill bodies. Plugins execute out-of-process; CLI, HTTP, and MCP stdio adapters have bounded inputs/outputs/timeouts. Network-backed adapters require explicit permission rather than silently replacing a local capability.
+`CapabilityRegistry` is the searchable inventory for built-ins and extensions. `ExtensionManager` discovers portable TOML manifests and Markdown skill bodies. Plugins execute out-of-process; CLI, HTTP, MCP stdio, and Streamable HTTP MCP adapters have bounded inputs/outputs/timeouts. Network-backed adapters require explicit permission rather than silently replacing a local capability. Civitai is registered through its HTTPS Streamable HTTP MCP endpoint: read-only tools can run anonymously, while account/write tools require the encrypted Civitai key plus explicit confirmation.
 
 Capability packs group related features without duplicating implementations. `ExtensionWizard` creates new skill/plugin skeletons that inherit ChatMPD permission and verification rules. Platform Doctor reports broken extensions and performs repairs only within ChatMPD-managed state.
 

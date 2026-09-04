@@ -597,14 +597,38 @@ async function renderKnowledgeSection() {
   renderControlCards(cards);
 }
 async function renderCapabilitiesSection() {
-  const [items, packs, extensions, sources] = await Promise.all([
+  const [items, packs, extensions, sources, civitai] = await Promise.all([
     api("/api/platform/capabilities"), api("/api/platform/packs"),
     api("/api/platform/extensions"), api("/api/platform/mod-sources"),
+    api("/api/platform/civitai"),
   ]);
   const cards = [];
   const sourceCard = controlCard("Mod repositories", `ESOUI: ${sources.esoui?.catalog || "not configured"}\nNexus Mods: ${sources.nexus?.site || "not configured"}`);
   sourceCard.append(controlNode("small", sources.nexus?.api_key_configured ? "Nexus API key configured" : "Nexus API key optional and not configured"));
   cards.push(sourceCard);
+  const civitaiCard = controlCard("Civitai MCP",
+    `${civitai.endpoint || "https://mcp.civitai.com/mcp"} · anonymous browse ${civitai.browse_anonymous ? "enabled" : "unavailable"}`);
+  civitaiCard.append(controlNode("small", civitai.api_key_configured
+    ? "Civitai API key stored in the Windows-protected vault"
+    : "Civitai API key optional; required only for account/write actions"));
+  const civitaiKey = controlInput("Optional Civitai API key");
+  civitaiKey.type = "password";
+  civitaiKey.autocomplete = "new-password";
+  civitaiCard.append(civitaiKey, controlAction("Save Civitai key", async () => {
+    if (!civitaiKey.value.trim()) return;
+    if (!window.confirm("Store this Civitai API key in ChatMPD's Windows-protected vault?")) return;
+    await api("/api/platform/secrets/civitai-api-key", { method: "POST", body: JSON.stringify({ value: civitaiKey.value.trim(), confirmed: true }) });
+    civitaiKey.value = "";
+    await loadControlSection("capabilities");
+  }));
+  civitaiCard.append(controlAction("List Civitai tools", async () => {
+    const result = await api("/api/platform/civitai/tools", { method: "POST", body: "{}" });
+    const names = (result.tools || []).slice(0, 80).map((tool) =>
+      `${tool.name || "unnamed"}${tool.annotations?.readOnlyHint === true ? " · read-only" : " · confirmation-gated"}`
+    ).join("\n");
+    civitaiCard.append(controlNode("pre", names || "No tools returned.", "control-prompt-output"));
+  }, "primary-button"));
+  cards.push(civitaiCard);
   for (const pack of packs) {
     const card = controlCard(pack.name, pack.description || pack.pack_id);
     card.append(controlAction(pack.installed ? "Uninstall pack" : "Install pack", async () => {

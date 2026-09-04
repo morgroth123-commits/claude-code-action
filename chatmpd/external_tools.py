@@ -82,6 +82,36 @@ class ExternalToolRunner:
             raise RuntimeError("External HTTP response must be a JSON object.")
         return value
 
+    def list_mcp_http_tools(
+        self, endpoint: str, *, bearer_token: str | None = None
+    ) -> tuple[dict[str, Any], ...]:
+        session, protocol = self._initialize_mcp_http(endpoint, bearer_token=bearer_token)
+        result, _session = self._mcp_http_request(
+            endpoint, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+            bearer_token=bearer_token, session_id=session, protocol_version=protocol,
+        )
+        tools = (result or {}).get("result", {}).get("tools", [])
+        if not isinstance(tools, list):
+            raise RuntimeError("MCP tools/list result was malformed.")
+        return tuple(dict(item) for item in tools if isinstance(item, dict))
+
+    def call_mcp_http(
+        self, endpoint: str, tool_name: str, arguments: dict[str, Any],
+        *, bearer_token: str | None = None,
+    ) -> dict[str, Any]:
+        session, protocol = self._initialize_mcp_http(endpoint, bearer_token=bearer_token)
+        payload = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                   "params": {"name": str(tool_name), "arguments": dict(arguments)}}
+        response, _session = self._mcp_http_request(
+            endpoint, payload, bearer_token=bearer_token, session_id=session, protocol_version=protocol
+        )
+        if response is None or "error" in response:
+            raise RuntimeError("Remote MCP tool call failed.")
+        value = response.get("result")
+        if not isinstance(value, dict):
+            raise RuntimeError("MCP tool result must be a JSON object.")
+        return value
+
     def call_mcp(
         self,
         argv: Sequence[str],
@@ -121,6 +151,88 @@ class ExternalToolRunner:
         value = response.get("result")
         if not isinstance(value, dict):
             raise RuntimeError("MCP tool result must be a JSON object.")
+        return value
+
+    def _initialize_mcp_http(
+        self, endpoint: str, *, bearer_token: str | None
+    ) -> tuple[str | None, str]:
+        request = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                   "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                              "clientInfo": {"name": "ChatMPD", "version": "0.3"}}}
+        response, session = self._mcp_http_request(endpoint, request, bearer_token=bearer_token)
+        if response is None or "error" in response:
+            raise RuntimeError("Remote MCP initialize failed.")
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise RuntimeError("Remote MCP initialize result was malformed.")
+        protocol = str(result.get("protocolVersion") or "2025-06-18")
+        self._mcp_http_request(
+            endpoint, {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            bearer_token=bearer_token, session_id=session, protocol_version=protocol,
+        )
+        return session, protocol
+
+    def _mcp_http_request(
+        self, endpoint: str, payload: dict[str, Any], *, bearer_token: str | None = None,
+        session_id: str | None = None, protocol_version: str | None = None,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(str(endpoint))
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Remote MCP endpoint must be HTTP(S).")
+        if parsed.scheme == "http" and parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            raise ValueError("Remote MCP HTTP is allowed only for loopback; external endpoints require HTTPS.")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "User-Agent": "ChatMPD/0.3",
+        }
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+        if session_id:
+            headers["Mcp-Session-Id"] = session_id
+        if protocol_version:
+            headers["MCP-Protocol-Version"] = protocol_version
+        data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        request = urllib.request.Request(str(endpoint), data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                raw = response.read(self.max_output_bytes + 1)
+                session = response.headers.get("Mcp-Session-Id") or session_id
+                content_type = response.headers.get("Content-Type", "")
+        except Exception as error:
+            raise RuntimeError(f"Remote MCP request failed: {type(error).__name__}") from error
+        if len(raw) > self.max_output_bytes:
+            raise RuntimeError("Remote MCP response exceeded the output limit.")
+        if not raw:
+            return None, session
+        value = self._decode_mcp_http(raw, content_type)
+        return value, session
+
+    @staticmethod
+    def _decode_mcp_http(raw: bytes, content_type: str) -> dict[str, Any]:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise RuntimeError("Remote MCP response was not UTF-8.") from error
+        if "text/event-stream" in content_type.casefold() or text.lstrip().startswith(("data:", "event:")):
+            candidates = [line[5:].strip() for line in text.splitlines() if line.startswith("data:")]
+            for candidate in candidates:
+                if not candidate or candidate == "[DONE]":
+                    continue
+                try:
+                    value = json.loads(candidate)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(value, dict):
+                    return value
+            raise RuntimeError("Remote MCP event stream contained no JSON-RPC message.")
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("Remote MCP response was not valid JSON.") from error
+        if not isinstance(value, dict):
+            raise RuntimeError("Remote MCP response must be a JSON object.")
         return value
 
     def _run(self, argv: list[str], *, input_text: str | None = None) -> ProcessResult:
