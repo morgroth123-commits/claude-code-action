@@ -291,6 +291,7 @@ class PerformanceProfileSemanticsTest(unittest.TestCase):
             restored = optimizer.restore()
             self.assertEqual(restored.power_plan_guid, HIGH_PERFORMANCE)
             self.assertEqual(writes[-1], HIGH_PERFORMANCE)
+            self.assertEqual(optimizer.status()["active_mode"], "restored")
 
 
 class PerformanceWindowsContextTest(unittest.TestCase):

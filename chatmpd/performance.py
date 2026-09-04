@@ -544,7 +544,7 @@ class VaderOptimizer:
             if decision.requires_confirmation and not confirmed:
                 raise PermissionError(decision.reason)
             self._power_setter(baseline)
-        state["active_mode"] = "balanced"
+        state["active_mode"] = "restored"
         state["baseline_guid"] = ""
         state["baseline_name"] = ""
         self._write_state(state)
