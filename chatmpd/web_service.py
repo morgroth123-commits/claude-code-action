@@ -8,11 +8,12 @@ import ipaddress
 import json
 import mimetypes
 import socket
+import subprocess
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import RLock, Thread
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
@@ -44,12 +45,14 @@ class WebAppService:
         assets_root: Path,
         max_body_bytes: int = 131_072,
         platform_services: Any | None = None,
+        folder_picker: Callable[[], str | None] | None = None,
     ) -> None:
         self.orchestrator = orchestrator
         self.conversations = conversations
         self.assets_root = Path(assets_root)
         self.max_body_bytes = int(max_body_bytes)
         self.platform_services = platform_services or getattr(orchestrator, "platform_services", None)
+        self._folder_picker = folder_picker or self._native_folder_picker
         self._server: ThreadingHTTPServer | None = None
         self._thread: Thread | None = None
         self._worker: Thread | None = None
@@ -125,6 +128,13 @@ class WebAppService:
             return
         if request.command == "GET" and path == "/api/client":
             self._json(request, 200, {"mode": "desktop"})
+            return
+        if request.command == "POST" and path == "/api/system/select-folder":
+            try:
+                selected = self._folder_picker()
+                self._json(request, 200, {"path": str(selected or "")})
+            except Exception as error:
+                self._json(request, 400, {"error": f"Folder picker failed: {type(error).__name__}"})
             return
         if path == "/api/mobile/start" and request.command == "POST":
             self._start_mobile_gateway(request)
@@ -432,6 +442,10 @@ class WebAppService:
             elif action == "branch":
                 count = payload.get("through_message_count")
                 document = self.conversations.branch(conversation_id, None if count is None else int(count))
+            elif action == "workspace":
+                document = self.conversations.set_workspace(
+                    conversation_id, payload.get("workspace")
+                )
             else:
                 self._json(request, 404, {"error": "not found"})
                 return
@@ -634,6 +648,27 @@ class WebAppService:
             return f"data:image/svg+xml;base64,{encoded}"
         except Exception:
             return ""
+
+    @staticmethod
+    def _native_folder_picker() -> str | None:
+        script = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog; "
+            "$dialog.Description='Choose a ChatMPD project folder'; "
+            "$dialog.ShowNewFolderButton=$false; "
+            "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){"
+            "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); "
+            "Write-Output $dialog.SelectedPath}"
+        )
+        completed = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-STA", "-Command", script],
+            capture_output=True, text=True, timeout=300, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if completed.returncode != 0:
+            raise RuntimeError("Native folder picker failed.")
+        value = completed.stdout.strip()
+        return value or None
 
     @staticmethod
     def _public_job(job: _Job) -> dict[str, Any]:

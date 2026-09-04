@@ -79,6 +79,29 @@ class AttachmentStore:
             connection.commit()
         return self.get(attachment_id)
 
+    def import_bytes(
+        self, data: bytes, *, original_name: str, conversation_id: str,
+        content_type: str | None = None,
+    ) -> AttachmentRecord:
+        payload = bytes(data)
+        if len(payload) > self.max_bytes:
+            raise ValueError(f"Attachment is too large: {original_name}")
+        name = Path(str(original_name).replace("\\", "/")).name.strip() or "attachment"
+        attachment_id = uuid4().hex
+        directory = self.root / str(conversation_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / f"{attachment_id}-{_safe_name(name)}"
+        destination.write_bytes(payload)
+        mime = str(content_type or mimetypes.guess_type(name)[0] or "application/octet-stream")
+        created = _now()
+        with self.database.connect() as connection:
+            connection.execute(
+                "INSERT INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (attachment_id, str(conversation_id), name, str(destination), mime, len(payload), created),
+            )
+            connection.commit()
+        return self.get(attachment_id)
+
     def get(self, attachment_id: str) -> AttachmentRecord:
         with self.database.connect() as connection:
             row = connection.execute(

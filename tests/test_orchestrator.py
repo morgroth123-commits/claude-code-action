@@ -85,3 +85,13 @@ class OrchestratorTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrchestratorToolEvidenceTest(unittest.TestCase):
+    def test_chat_reports_visible_tool_names_without_raw_tool_payloads(self) -> None:
+        assistant = _Assistant()
+        assistant.chat = lambda text: SimpleNamespace(
+            assistant="done", tools_used=("ext_plugin_echo",)
+        )
+        result = ChatMPDOrchestrator(assistant=assistant).command("Use echo")
+        self.assertEqual(result.details["tools_used"], ["ext_plugin_echo"])

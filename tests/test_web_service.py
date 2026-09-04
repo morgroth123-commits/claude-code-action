@@ -196,3 +196,24 @@ class WebServiceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WebWorkspaceContinuityTest(WebServiceTest):
+    def test_conversation_workspace_api_persists_project_selection(self) -> None:
+        document = self.library.create()
+        status, updated = self._request(
+            "POST", f"/api/conversations/{document.conversation_id}/workspace",
+            {"workspace": r"C:\Projects\ChatMPD"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["workspace"], r"C:\Projects\ChatMPD")
+        status, loaded = self._request(
+            "GET", f"/api/conversations/{document.conversation_id}"
+        )
+        self.assertEqual(loaded["workspace"], r"C:\Projects\ChatMPD")
+
+    def test_folder_picker_route_returns_injected_native_selection(self) -> None:
+        self.service._folder_picker = lambda: r"C:\Projects\Picked"
+        status, payload = self._request("POST", "/api/system/select-folder", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["path"], r"C:\Projects\Picked")

@@ -96,3 +96,10 @@ class DefaultSpecialistSummaryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DefaultAssistantToolWiringTest(unittest.TestCase):
+    def test_default_orchestrator_wires_permission_aware_extension_tools_into_chat(self) -> None:
+        source = inspect.getsource(build_default_orchestrator)
+        self.assertIn("tool_provider=services.assistant_tools.tools_for_prompt", source)
+        self.assertIn("tool_runner=services.assistant_tools.invoke", source)

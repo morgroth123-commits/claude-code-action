@@ -103,3 +103,26 @@ class CivitaiCapabilityInvocationTest(unittest.TestCase):
             result = services.capabilities.invoke("civitai", "search_models", {"query": "flux"})
             self.assertEqual(result["content"][0]["text"], "flux")
             services.close()
+
+
+class AssistantToolsPlatformIntegrationTest(unittest.TestCase):
+    def test_platform_retrieval_includes_relevant_installed_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            skill = root / "extensions" / "eso-guide"
+            skill.mkdir(parents=True)
+            (skill / "skill.toml").write_text(
+                '[extension]\nid="skill.eso-guide"\nname="ESO guide"\nkind="skill"\n'
+                'description="ESO Minion diagnosis"\ntags=["eso","minion"]\n',
+                encoding="utf-8",
+            )
+            (skill / "SKILL.md").write_text(
+                "Check addon manifests and dependencies before repairs.", encoding="utf-8"
+            )
+            services = build_platform_services(
+                paths=PlatformPaths(root), model_registry=ModelRegistry(()),
+                hardware_probe=lambda: None,
+            )
+            self.assertIn("addon manifests", services.retrieval_context("Diagnose ESO Minion"))
+            self.assertTrue(hasattr(services, "assistant_tools"))
+            services.close()

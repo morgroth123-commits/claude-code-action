@@ -78,7 +78,9 @@ class ChatMPDOrchestrator:
         decision = self.router.classify(text)
         if decision.capability == "chat":
             turn = self.assistant.chat(text)
-            return CommandResult("chat", str(turn.assistant), {})
+            tools_used = [str(item) for item in getattr(turn, "tools_used", ())]
+            details = {"tools_used": tools_used} if tools_used else {}
+            return CommandResult("chat", str(turn.assistant), details)
         if decision.capability == "coding":
             if workspace is None or not str(workspace).strip():
                 raise ValueError("This coding request needs a project folder.")

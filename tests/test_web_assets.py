@@ -50,3 +50,12 @@ class WebAssetTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProjectContinuityWebAssetTest(unittest.TestCase):
+    def test_project_picker_is_native_and_workspace_is_restored_per_conversation(self) -> None:
+        script = (WEB / "app.js").read_text(encoding="utf-8")
+        self.assertIn("/api/system/select-folder", script)
+        self.assertIn("/workspace", script)
+        self.assertIn("document.workspace", script)
+        self.assertNotIn('window.prompt("Project folder on this PC"', script)

@@ -69,6 +69,8 @@ class ExtensionManager:
             "entrypoint": entrypoint,
             "command": raw.get("command"),
             "endpoint": raw.get("endpoint"),
+            "tool_name": raw.get("tool_name"),
+            "parameters": raw.get("parameters"),
             "tags": raw.get("tags") or [],
         }
         return CapabilityDescriptor(

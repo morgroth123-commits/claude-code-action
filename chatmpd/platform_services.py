@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from .activity import ActivityLog
 from .attachments import AttachmentStore
+from .assistant_tools import AssistantCapabilityBroker
 from .automation_engine import AutomationScheduler, AutomationStore
 from .capabilities import CapabilityDescriptor, CapabilityRegistry
 from .civitai import CivitaiMCP
@@ -67,6 +68,7 @@ class PlatformServices:
     workflows: WorkflowStore
     automations: AutomationStore
     activity: ActivityLog
+    assistant_tools: AssistantCapabilityBroker
     permissions: PermissionProfileStore
     secrets: SecretsVault
     recovery: RecoveryCenter
@@ -121,6 +123,10 @@ class PlatformServices:
             for hit in list(knowledge.values())[:max_items]:
                 excerpt = " ".join(hit.text.split())[:700]
                 lines.append(f"- {excerpt} [source: {hit.title} | {hit.path}]")
+        skill_context = self.assistant_tools.skill_context(prompt)
+        if skill_context:
+            lines.append("Relevant installed skill guidance:")
+            lines.append(skill_context)
         return "\n".join(lines)
 
     def capture_explicit_memory(self, text: str) -> MemoryRecord | None:
@@ -233,6 +239,9 @@ def build_platform_services(
         ),
     )
     activity = ActivityLog(database)
+    assistant_tools = AssistantCapabilityBroker(
+        extensions=extension_manager, permissions=permissions, activity=activity
+    )
     performance_store = PerformanceStore(database)
     performance_analyzer = PerformanceAnalyzer(performance_store, evidence_probe=performance_probe)
     optimizer_kwargs = {"database": database, "permissions": permissions, "activity": activity}
@@ -261,6 +270,7 @@ def build_platform_services(
         workflows=WorkflowStore(database),
         automations=AutomationStore(database),
         activity=activity,
+        assistant_tools=assistant_tools,
         permissions=permissions,
         secrets=secrets,
         recovery=RecoveryCenter(database, paths.recovery),

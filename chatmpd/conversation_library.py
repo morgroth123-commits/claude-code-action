@@ -54,6 +54,7 @@ class ConversationSummary:
     created_at: str
     updated_at: str
     preview: str
+    workspace: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ class ConversationDocument:
     created_at: str
     updated_at: str
     messages: list[dict[str, str]]
+    workspace: str | None = None
 
     def summary(self) -> ConversationSummary:
         preview = ""
@@ -71,7 +73,7 @@ class ConversationDocument:
             preview = " ".join(self.messages[-1]["content"].split())[:100]
         return ConversationSummary(
             self.conversation_id, self.title, self.pinned,
-            self.created_at, self.updated_at, preview,
+            self.created_at, self.updated_at, preview, self.workspace,
         )
 
 
@@ -138,6 +140,18 @@ class ConversationLibrary:
             self._write(updated)
             return updated
 
+    def set_workspace(
+        self, conversation_id: str, workspace: str | None
+    ) -> ConversationDocument:
+        cleaned = None if workspace is None else str(workspace).strip() or None
+        if cleaned is not None and len(cleaned) > 2048:
+            raise ValueError("Workspace path is too long.")
+        with self._lock:
+            current = self.load(conversation_id)
+            updated = self._replace(current, workspace=cleaned, updated_at=_now())
+            self._write(updated)
+            return updated
+
     def set_pinned(self, conversation_id: str, pinned: bool) -> ConversationDocument:
         with self._lock:
             current = self.load(conversation_id)
@@ -154,7 +168,7 @@ class ConversationLibrary:
             now = _now()
             branch = ConversationDocument(
                 uuid4().hex, f"{source.title} (branch)"[:100], False,
-                now, now, list(source.messages[:count]),
+                now, now, list(source.messages[:count]), source.workspace,
             )
             self._write(branch)
             return branch
@@ -215,6 +229,7 @@ class ConversationLibrary:
             created_at=created_at,
             updated_at=updated_at,
             messages=messages,
+            workspace=(str(payload.get("workspace")).strip() if payload.get("workspace") else None),
         )
 
     @staticmethod
@@ -226,6 +241,7 @@ class ConversationLibrary:
             "created_at": document.created_at,
             "updated_at": document.updated_at,
             "messages": document.messages,
+            "workspace": document.workspace,
         }
         values.update(changes)
         return ConversationDocument(**values)
@@ -241,6 +257,7 @@ class ConversationLibrary:
             "created_at": document.created_at,
             "updated_at": document.updated_at,
             "messages": _clean_messages(document.messages),
+            "workspace": document.workspace,
         }
         with tempfile.NamedTemporaryFile(
             "w", encoding="utf-8", dir=self.root, delete=False

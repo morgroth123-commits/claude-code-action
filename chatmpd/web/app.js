@@ -113,10 +113,18 @@ async function loadConversations(query = "") {
   renderConversationList(state.conversations);
 }
 
+function renderWorkspace(workspace) {
+  state.workspace = String(workspace || "").trim();
+  $("project-label").textContent = state.workspace || "Choose project";
+  $("workspace-chip").textContent = state.workspace;
+  $("workspace-chip").hidden = !state.workspace;
+}
+
 async function createConversation() {
   const document = await api("/api/conversations", { method: "POST", body: "{}" });
   state.activeConversation = document.conversation_id;
   $("conversation-title").textContent = document.title;
+  renderWorkspace(document.workspace);
   renderMessages(document.messages || []);
   await loadConversations();
   $("prompt").focus();
@@ -128,6 +136,7 @@ async function openConversation(conversationId) {
   const document = await api(`/api/conversations/${encodeURIComponent(conversationId)}`);
   state.activeConversation = document.conversation_id;
   $("conversation-title").textContent = document.title;
+  renderWorkspace(document.workspace);
   renderMessages(document.messages || []);
   await loadConversations($("conversation-search").value.trim());
   showSidebar(false);
@@ -403,13 +412,19 @@ function renderResult(result) {
   if (bubble) bubble.append(wrapper);
 }
 
-function chooseWorkspace() {
-  const value = window.prompt("Project folder on this PC", state.workspace || "");
-  if (value === null) return;
-  state.workspace = value.trim();
-  $("project-label").textContent = state.workspace || "Local on this PC";
-  $("workspace-chip").textContent = state.workspace;
-  $("workspace-chip").hidden = !state.workspace;
+async function chooseWorkspace() {
+  if (!state.activeConversation) await createConversation();
+  if (state.clientMode === "mobile") {
+    $("capability-label").textContent = "Choose the project once on the desktop PC";
+    return;
+  }
+  const selection = await api("/api/system/select-folder", { method: "POST", body: "{}" });
+  const workspace = String(selection.path || "").trim();
+  if (!workspace) return;
+  const document = await api(`/api/conversations/${state.activeConversation}/workspace`, {
+    method: "POST", body: JSON.stringify({ workspace }),
+  });
+  renderWorkspace(document.workspace);
 }
 
 function showConversationActions() {

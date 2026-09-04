@@ -265,6 +265,8 @@ def build_default_orchestrator(*, start_automation_scheduler: bool = True) -> Ch
         model_manager=manager,
         provider_factory=lambda endpoint: LlamaCppProvider(endpoint, timeout=300),
         context_provider=services.retrieval_context,
+        tool_provider=services.assistant_tools.tools_for_prompt,
+        tool_runner=services.assistant_tools.invoke,
     )
     media = DefaultMediaSpecialist()
     services.performance.bind_runtime(assistant.release_runtime)

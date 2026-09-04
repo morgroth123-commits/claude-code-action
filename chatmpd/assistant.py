@@ -36,6 +36,7 @@ class ChatTurn:
 
     user: str
     assistant: str
+    tools_used: tuple[str, ...] = ()
 
 
 class ConversationStore:
@@ -67,6 +68,7 @@ class ConversationStore:
             "created_at": str(existing.get("created_at") or existing.get("updated_at") or now),
             "updated_at": now,
             "messages": messages,
+            "workspace": existing.get("workspace"),
         }
         with tempfile.NamedTemporaryFile(
             "w", encoding="utf-8", dir=self.root, delete=False
@@ -94,9 +96,14 @@ class DesktopAssistant:
         task_runner: Callable[..., Any] = run_project_task,
         history_character_budget: int = 48_000,
         context_provider: Callable[[str], str] | None = None,
+        tool_provider: Callable[[str], list[dict[str, Any]]] | None = None,
+        tool_runner: Callable[[str, dict[str, Any]], Any] | None = None,
+        max_tool_rounds: int = 4,
     ) -> None:
         if history_character_budget < 4_000:
             raise ValueError("history_character_budget must be at least 4000")
+        if not 1 <= int(max_tool_rounds) <= 8:
+            raise ValueError("max_tool_rounds must be between 1 and 8")
         self._model_manager = model_manager
         self.runtime = runtime or (None if model_manager is not None else LlamaCppRuntime(
             RuntimeConfig(context_size=16_384, max_tokens=2_048)
@@ -108,6 +115,9 @@ class DesktopAssistant:
         self._task_runner = task_runner
         self._history_character_budget = history_character_budget
         self._context_provider = context_provider
+        self._tool_provider = tool_provider
+        self._tool_runner = tool_runner
+        self._max_tool_rounds = int(max_tool_rounds)
         self._conversation_id = uuid4().hex
         self._messages: list[dict[str, str]] = []
         self._lock = RLock()
@@ -161,7 +171,35 @@ class DesktopAssistant:
                 *self._bounded_history(prompt),
                 {"role": "user", "content": prompt},
             ]
-            response = provider.chat(request_messages)
+            tools = list(self._tool_provider(prompt) or []) if self._tool_provider else []
+            tools_used: list[str] = []
+            tool_rounds = 0
+            while True:
+                response = (
+                    provider.chat(request_messages, tools=tools)
+                    if tools else provider.chat(request_messages)
+                )
+                calls = tuple(getattr(response, "tool_calls", ()) or ())
+                if not calls:
+                    break
+                if self._tool_runner is None:
+                    raise RuntimeError("The local model requested a tool, but no tool runner is configured.")
+                if tool_rounds >= self._max_tool_rounds:
+                    raise RuntimeError("The local model exceeded the tool-call limit.")
+                tool_rounds += 1
+                request_messages.append(self._assistant_tool_message(response, calls))
+                for call in calls:
+                    tools_used.append(str(call.name))
+                    try:
+                        value = self._tool_runner(str(call.name), dict(call.arguments))
+                    except Exception as error:
+                        value = {"error": f"{type(error).__name__}: {error}"[:500]}
+                    request_messages.append({
+                        "role": "tool",
+                        "tool_call_id": str(call.id),
+                        "name": str(call.name),
+                        "content": self._bounded_tool_result(value),
+                    })
             answer = str(response.text).strip()
             if not answer:
                 raise RuntimeError("The local model returned an empty answer.")
@@ -172,7 +210,38 @@ class DesktopAssistant:
                 ]
             )
             self._store.save(self._conversation_id, deepcopy(self._messages))
-            return ChatTurn(prompt, answer)
+            return ChatTurn(prompt, answer, tuple(tools_used))
+
+
+    @staticmethod
+    def _assistant_tool_message(response: Any, calls: tuple[Any, ...]) -> dict[str, Any]:
+        return {
+            "role": "assistant",
+            "content": str(getattr(response, "text", "") or ""),
+            "tool_calls": [
+                {
+                    "id": str(call.id),
+                    "type": "function",
+                    "function": {
+                        "name": str(call.name),
+                        "arguments": json.dumps(dict(call.arguments), ensure_ascii=False, allow_nan=False),
+                    },
+                }
+                for call in calls
+            ],
+        }
+
+    @staticmethod
+    def _bounded_tool_result(value: Any, *, max_bytes: int = 65_536) -> str:
+        try:
+            text = json.dumps(value, ensure_ascii=False, allow_nan=False, default=str)
+        except (TypeError, ValueError):
+            text = json.dumps({"result": str(value)}, ensure_ascii=False)
+        raw = text.encode("utf-8", errors="replace")
+        if len(raw) <= max_bytes:
+            return text
+        preview = raw[: max_bytes - 200].decode("utf-8", errors="replace")
+        return json.dumps({"truncated": True, "preview": preview}, ensure_ascii=False)
 
     def run_task(self, workspace: Path, task: str) -> Any:
         root = Path(workspace).expanduser().resolve()
