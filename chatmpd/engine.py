@@ -184,6 +184,33 @@ class AgentEngine:
                 "bytes": len(content.encode("utf-8")),
                 "sha256": hashlib.sha256(content.encode()).hexdigest(),
             }
+        elif name == "search_text":
+            query = str(arguments.get("query", ""))
+            if not query or len(query.encode("utf-8")) > 4_096:
+                raise ValueError("Search query must contain 1 to 4096 UTF-8 bytes")
+            requested = str(arguments.get("path", "."))
+            case_sensitive = bool(arguments.get("case_sensitive", False))
+            self._record(events_file, "permission_allowed", {"tool": name})
+            self._record(events_file, "tool_started", {"tool": name})
+            result = self._search_text(requested, query, case_sensitive)
+        elif name == "replace_text":
+            path, relative = self._safe_path(str(arguments["path"]))
+            if not self.policy.permits_write(relative):
+                raise PermissionError(f"Writing {relative!r} is not permitted")
+            old_text = str(arguments.get("old_text", ""))
+            new_text = str(arguments.get("new_text", ""))
+            expected = int(arguments.get("expected_replacements", 1))
+            if not old_text:
+                raise ValueError("old_text must not be empty")
+            if expected < 1 or expected > 1_000:
+                raise ValueError("expected_replacements must be between 1 and 1000")
+            self._record(events_file, "permission_allowed", {"tool": name})
+            self._record(events_file, "tool_started", {"tool": name})
+            result = self._replace_text(
+                path, relative, old_text, new_text, expected, events_file.parent
+            )
+            if relative not in self.changed_files:
+                self.changed_files.append(relative)
         elif name == "write_file":
             path, relative = self._safe_path(str(arguments["path"]))
             if not self.policy.permits_write(relative):
@@ -273,7 +300,7 @@ class AgentEngine:
         )
         self.last_tool_error = None
         sequence = len(self.events)
-        if name == "write_file":
+        if name in {"write_file", "replace_text"}:
             self.last_write_sequence = sequence
         if name == "run_command":
             if self.policy.is_required_check(result["argv"]):
@@ -397,6 +424,105 @@ class AgentEngine:
         files.sort(key=lambda item: item["path"].casefold())
         return {"root": relative_root, "files": files, "truncated": truncated}
 
+    def _search_text(
+        self, requested: str, query: str, case_sensitive: bool
+    ) -> dict[str, Any]:
+        if requested in {"", "."}:
+            root, relative_root = self.workspace, "."
+        else:
+            root, relative_root = self._safe_path(requested)
+        if not root.exists():
+            raise FileNotFoundError(f"Search path does not exist: {relative_root}")
+        if root.is_file():
+            candidates = [{"path": relative_root, "bytes": root.stat().st_size}]
+            inventory_truncated = False
+        elif root.is_dir():
+            inventory = self._list_files(root, relative_root)
+            candidates = list(inventory["files"])
+            inventory_truncated = bool(inventory["truncated"])
+        else:
+            raise RuntimeError(f"Search path is not a regular file or directory: {relative_root}")
+
+        needle = query if case_sensitive else query.casefold()
+        matches: list[dict[str, Any]] = []
+        truncated = inventory_truncated
+        for item in candidates:
+            if int(item["bytes"]) > 262_144:
+                continue
+            path, relative = self._safe_path(str(item["path"]))
+            try:
+                with path.open("r", encoding="utf-8", newline="") as source:
+                    for line_number, line in enumerate(source, start=1):
+                        haystack = line if case_sensitive else line.casefold()
+                        if needle not in haystack:
+                            continue
+                        if len(matches) >= 100:
+                            truncated = True
+                            break
+                        text = line.rstrip("\r\n")
+                        matches.append(
+                            {"path": relative, "line": line_number, "text": text[:500]}
+                        )
+            except (OSError, UnicodeDecodeError):
+                continue
+            if truncated and len(matches) >= 100:
+                break
+        return {
+            "root": relative_root,
+            "query": query,
+            "matches": matches,
+            "truncated": truncated,
+        }
+
+    def _replace_text(
+        self,
+        path: Path,
+        relative: str,
+        old_text: str,
+        new_text: str,
+        expected: int,
+        run_directory: Path,
+    ) -> dict[str, Any]:
+        if not path.is_file():
+            raise FileNotFoundError(f"Project file does not exist: {relative}")
+        if path.stat().st_size > 262_144:
+            raise RuntimeError("File exceeds the 256 KiB edit limit")
+        with path.open("r", encoding="utf-8", newline="") as source:
+            content = source.read()
+        encoded = content.encode("utf-8")
+        if len(encoded) > 262_144:
+            raise RuntimeError("File exceeds the 256 KiB edit limit")
+        count = content.count(old_text)
+        if count != expected:
+            raise ValueError(
+                f"Expected {expected} replacement(s), but found {count}; file was not changed"
+            )
+        updated = content.replace(old_text, new_text)
+        updated_bytes = updated.encode("utf-8")
+        if len(updated_bytes) > 262_144:
+            raise RuntimeError("Edited file would exceed the 256 KiB write limit")
+        self._backup_original(path, relative, run_directory)
+        previous_stat = path.stat()
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", newline="", dir=path.parent, delete=False
+        ) as temporary:
+            temporary.write(updated)
+            temporary_path = Path(temporary.name)
+        try:
+            revalidated, canonical = self._safe_path(relative)
+            if revalidated != path or canonical != relative:
+                raise PermissionError("The edit target changed during validation")
+            os.replace(temporary_path, path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        self._ensure_changed_timestamp(path, previous_stat, len(updated_bytes))
+        return {
+            "path": relative,
+            "replacements": count,
+            "bytes": len(updated_bytes),
+            "sha256": hashlib.sha256(updated_bytes).hexdigest(),
+        }
+
     @staticmethod
     def _validate_path_component(part: str) -> None:
         if part != part.rstrip(" ."):
@@ -457,6 +583,19 @@ class AgentEngine:
                 "bytes": result["bytes"],
                 "sha256": result["sha256"],
                 "content_persisted": False,
+            }
+        if name == "search_text":
+            query = str(result.get("query", "")).encode("utf-8")
+            return {
+                "root": result["root"],
+                "query_bytes": len(query),
+                "query_sha256": hashlib.sha256(query).hexdigest(),
+                "matches": [
+                    {"path": match["path"], "line": match["line"]}
+                    for match in result.get("matches", [])
+                ],
+                "truncated": bool(result.get("truncated", False)),
+                "matched_text_persisted": False,
             }
         if name == "run_command":
             stdout = str(result.get("stdout", "")).encode("utf-8")

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ChatMPD"
-version = "0.1.0"
-description = "A free, local-first coding agent with isolated verification"
+version = "0.2.0"
+description = "A local-first autonomous assistant with model routing, verified coding, game specialists, media, and mobile access"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }

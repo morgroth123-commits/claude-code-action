@@ -7,6 +7,7 @@ import re
 from copy import deepcopy
 from typing import Any
 
+from .doctrine import coding_agent_prompt
 from .llamacpp import ChatResponse, ProviderError, ToolCall
 
 
@@ -64,6 +65,39 @@ TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": "Complete new contents of the file.",
                     },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_text",
+            "description": "Search safe project text files with bounded results.",
+            "parameters": {
+                "type": "object", "additionalProperties": False,
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "path": {"type": "string", "default": "."},
+                    "case_sensitive": {"type": "boolean", "default": False},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replace_text",
+            "description": "Atomically replace an exact text fragment in one safe project file.",
+            "parameters": {
+                "type": "object", "additionalProperties": False,
+                "required": ["path", "old_text", "new_text"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_text": {"type": "string"},
+                    "new_text": {"type": "string"},
+                    "expected_replacements": {"type": "integer", "minimum": 1, "default": 1},
                 },
             },
         },
@@ -236,7 +270,15 @@ class LocalCodingModel:
                 parse_constant=lambda unused: (_ for _ in ()).throw(ValueError()),
             )
         except (json.JSONDecodeError, ValueError):
-            return None
+            if not (candidate.startswith("{{") and candidate.endswith("}}")):
+                return None
+            try:
+                decoded = json.loads(
+                    candidate[1:-1],
+                    parse_constant=lambda unused: (_ for _ in ()).throw(ValueError()),
+                )
+            except (json.JSONDecodeError, ValueError):
+                return None
         if not isinstance(decoded, dict) or set(decoded) != {"name", "arguments"}:
             return None
         name = decoded.get("name")
@@ -256,21 +298,7 @@ class LocalCodingModel:
         )
 
     def _system_prompt(self) -> str:
-        commands = json.dumps(self.allowed_commands, ensure_ascii=True)
-        return (
-            "You are ChatMPD, a local autonomous coding agent. Work only inside the "
-            "given project. Never request credentials, payments, or interactive user "
-            "permission. Use exactly one provided tool per turn. Read relevant files, "
-            "make the smallest maintainable change, diagnose failures from tool results, "
-            "and run the required checks after the last write before claiming success. "
-            "Paths must be workspace-relative. Never request .git, .chatmpd, environment "
-            "files, private keys, or credentials. Never invent a command: run_command argv "
-            f"must exactly equal one item in this approved list: {commands}. "
-            "If a tool fails, correct the request and continue. Give a concise final "
-            "summary only after verification. A final response must begin exactly "
-            "SUCCESS: when the task is complete and verified, or FAILED: when it cannot "
-            "be completed safely. Text without one of those prefixes is not success."
-        )
+        return coding_agent_prompt(self.allowed_commands)
 
     def _initial_request(self, task: str) -> str:
         context = (

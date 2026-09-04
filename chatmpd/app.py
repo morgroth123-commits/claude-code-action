@@ -33,17 +33,22 @@ def dispatch(
     *,
     cli_runner: Callable[[Sequence[str]], int] | None = None,
     gui_launcher: Callable[[Callable[[Path, str], Any]], None] | None = None,
+    universal_launcher: Callable[[], None] | None = None,
 ) -> int:
     """Route a double-click to the GUI and explicit arguments to the CLI."""
 
     argv = list(arguments)
     if argv:
         return int((cli_runner or cli_main)(argv))
-    if gui_launcher is None:
-        from .gui import launch_gui
+    if gui_launcher is not None:
+        gui_launcher(run_local_task)
+        return 0
+    if universal_launcher is None:
+        from .defaults import build_default_orchestrator
+        from .universal_gui import launch_universal_gui
 
-        gui_launcher = launch_gui
-    gui_launcher(run_local_task)
+        universal_launcher = lambda: launch_universal_gui(build_default_orchestrator())
+    universal_launcher()
     return 0
 
 

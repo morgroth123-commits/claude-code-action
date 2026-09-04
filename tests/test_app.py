@@ -36,6 +36,15 @@ class ApplicationDispatchTest(unittest.TestCase):
         self.assertEqual(len(launched), 1)
         self.assertTrue(callable(launched[0]))
 
+    def test_production_no_argument_path_can_launch_the_universal_front_door(self) -> None:
+        from chatmpd.app import dispatch
+
+        launched: list[str] = []
+        result = dispatch([], universal_launcher=lambda: launched.append("universal"))
+
+        self.assertEqual(result, 0)
+        self.assertEqual(launched, ["universal"])
+
     def test_arguments_are_forwarded_to_the_cli_without_opening_a_window(self) -> None:
         from chatmpd.app import dispatch
 

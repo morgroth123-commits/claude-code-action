@@ -1,164 +1,96 @@
-# ChatMPD architecture
+# ChatMPD 0.2 architecture
 
-This document describes the current ChatMPD 0.1 task path. It is intended to help an owner understand where work happens and to give contributors a canonical reference for implementation boundaries.
+ChatMPD is a local-first autonomous assistant whose public interface is a plain-language command. The architecture separates general orchestration from hardened specialist capabilities so adding host/media/game features does not weaken the verified coding boundary.
 
-## Goals and non-goals
+## High-level flow
 
-ChatMPD is designed to:
-
-- provide a simple Windows GUI for one local coding task at a time
-- use a local llama.cpp server and the official Qwen2.5-Coder-7B-Instruct GGUF model without a paid API or vendor quota
-- restrict project execution to one automatically selected Python verification command
-- run that verification in a disposable, offline WSL Ubuntu plus bubblewrap snapshot
-- protect repository state and known secret locations
-- keep local backups and compact task records
-- reduce model resource contention while `eso64.exe` is running
-
-ChatMPD is not a general shell, cloud agent, GitHub bot, multi-language build system, perfect sandbox, automatic source-control client, or guarantee of correct code.
-
-## Component map
-
-```mermaid
-flowchart LR
-    Owner["Owner"] --> UI["Windows GUI or optional CLI"]
-    UI --> Service["Task service"]
-    Service --> Profile["Project profiler"]
-    Profile --> Files["Filtered manifest"]
-    Profile --> Git["Sanitized local Git context"]
-    Service --> Runtime["llama.cpp runtime manager"]
-    Runtime --> Server["llama-server.exe on 127.0.0.1:8080"]
-    Server --> Model["Local Qwen2.5-Coder-7B-Instruct GGUF"]
-    Service --> Agent["Agent engine and path policy"]
-    Agent <--> Adapter["Local model adapter"]
-    Adapter <--> Server
-    Agent -->|"bounded read / atomic write"| Project["Selected Windows project"]
-    Agent --> Records[".chatmpd run record and backups"]
-    Agent --> Sandbox["Sandbox runner"]
-    Sandbox --> Snapshot["Filtered tar snapshot"]
-    Snapshot --> WSL["WSL distro: Ubuntu"]
-    WSL --> Bwrap["bubblewrap, no network"]
-    Bwrap --> Check["Exact unittest or compileall argv"]
-    Check --> Agent
+```text
+Desktop GUI ─┐
+             ├─> ChatMPDOrchestrator -> RequestRouter -> capability
+Mobile PWA ──┘          |
+                         +-> reasoning chat -> ModelRuntimeManager -> llama.cpp
+                         +-> coding -> hardened AgentEngine -> WSL/bubblewrap checks
+                         +-> system -> bounded host inspection
+                         +-> ESO -> evidence scan / guarded reversible management
+                         +-> Vortex -> read-only inventory
+                         +-> media -> MediaRuntime -> ComfyUI -> output/FFmpeg
 ```
 
-The important split is that file edits happen in the selected Windows project through ChatMPD's path gate, while verification runs against a filtered copy. A command running in bubblewrap cannot edit the live project because the live project is never mounted there.
+Desktop and mobile call the same orchestrator. The orchestrator serializes commands so two clients cannot race model swaps or GPU work.
 
-## Main components
+## Model layer
 
-| Component | Responsibility | Important boundary |
-| --- | --- | --- |
-| `chatmpd.app` | Routes a double-click/no-argument launch to the GUI and explicit arguments to the CLI. Owns one runtime context per task. | A server started by that context is released when the task exits. |
-| `chatmpd.gui` | Collects a project folder and task, runs work on one background thread, and renders a concise outcome. | Rejects blank inputs and prevents two concurrent tasks in the same window. |
-| `chatmpd.cli` | Provides optional `doctor`, `run`, and deterministic `demo` commands. | Converts expected failures to bounded messages and stable exit codes. |
-| `chatmpd.project` | Builds a safe manifest, selects project support, and collects sanitized Git context. | Excludes links, state, caches, common secret directories, and known credential files. |
-| `chatmpd.runtime` | Discovers llama.cpp/model files, selects performance mode, starts and stops an owned process, and checks endpoint identity. | Accepts only plain-HTTP loopback URLs and refuses any endpoint already occupied by another process. |
-| `chatmpd.llamacpp` | Sends bounded, non-streaming OpenAI-compatible chat requests to llama.cpp. | Disables proxy use, validates response shapes, and rejects oversized or malformed JSON. |
-| `chatmpd.local_model` | Turns model responses into one plan/action at a time. | Exposes only list, read, write, and exact-command tools; requests one tool call per turn. |
-| `chatmpd.engine` | Enforces path/command policy, performs atomic writes, creates backups and records, and requires fresh verification. | Protects workspace containment and accepts success only after required checks pass after the last write. |
-| `chatmpd.sandbox` | Copies safe project files and runs the approved argv under WSL/bubblewrap. | Uses a temporary snapshot, clears the environment, drops capabilities, unshares networking, and applies time/output/size bounds. |
-| `chatmpd.git_context` | Queries repository root, branch, origin identity, status, and diff. | Uses local read-only Git commands with prompts and optional locks disabled; never fetches or mutates Git state. |
+`ModelRegistry` discovers compatible local GGUF files below configured model roots and assigns roles. Complete numbered split GGUFs are represented once using shard 1; incomplete splits are ignored.
 
-## Task path and component behavior
+Vader's current roles are:
 
-### 1. Input, project preflight, and local model runtime
+- reasoning: gpt-oss-20B MXFP4
+- coding: Qwen2.5-Coder-7B-Instruct Q4_K_M
+- fast: Qwen2.5-Coder-1.5B variants
+- embedding: Nomic Embed Text V2
 
-The GUI passes a chosen project directory and non-empty task to `run_local_task`; its folder chooser normally returns an existing directory. The optional CLI validates that the workspace already exists and the task is non-empty. Both live paths complete `prepare_project_task()`—including workspace resolution, task-size validation, project profiling, Git-context collection, and verification selection—before entering the `LlamaCppRuntime` context. A preflight failure therefore does not start llama.cpp.
+`ModelRuntimeManager` keeps at most one llama.cpp role active at a time. General chat activates reasoning; project tasks activate coding. Specialist work releases the active LLM first. llama.cpp stays on loopback and is never exposed directly to mobile clients.
 
-`LlamaCppRuntime` discovers:
+## Shared behavior doctrine
 
-- `llama-server.exe` on `PATH`, or below the current user's WinGet package directory for `ggml.llamacpp`
-- a `Qwen2.5-Coder-7B-Instruct` `Q4_K_M` GGUF, including a complete numbered split, anywhere below `D:\ChatMPD\models\huggingface`
+`chatmpd.doctrine` supplies original product rules shared by chat and coding prompts: local-first operation, evidence before claims, preservation of existing work, autonomy for ordinary reversible actions, and explicit escalation at critical system boundaries.
+## Hardened coding capability
 
-The endpoint defaults to `http://127.0.0.1:8080`. Before starting, ChatMPD checks `/health` and `/v1/models` for diagnostics and the private alias `chatmpd-local`. Any already-healthy service is treated as an endpoint conflict and is neither terminated nor borrowed. A matching alias produces a ChatMPD-specific conflict message but does not transfer process ownership.
+The coding engine remains project-only. `prepare_project_task()` resolves a supported Python project, builds a bounded safe manifest, sanitizes local Git context, selects one exact verification command, and proves the WSL/bubblewrap sandbox is available before model execution.
 
-The managed server uses an 8,192-token context, a 512-token response cap, a single parallel request, no web UI, and a reduced environment. Output is appended to `%LOCALAPPDATA%\ChatMPD\runtime\llama-server.log`, and the owned process is terminated when the runtime context exits.
+The coding model can use only:
 
-Performance mode is selected at startup:
+- `list_files`: bounded safe inventory
+- `read_file`: bounded UTF-8 read
+- `search_text`: bounded safe text search
+- `write_file`: atomic bounded replacement/create
+- `replace_text`: exact-count surgical replacement
+- `run_command`: one exact pre-approved argv
 
-| `eso64.exe` state | llama.cpp configuration |
-| --- | --- |
-| Detected | CPU only, one inference thread, one batch thread, zero GPU layers, Windows `IDLE_PRIORITY_CLASS`. |
-| Not detected | Automatic GPU-layer offload. |
-| Detection cannot complete | Conservatively treated as detected: CPU-safe settings and idle priority. |
+Paths are workspace-relative and reject traversal, symlinks/junctions, Windows device aliases, `.git`, `.chatmpd`, common secret directories, environment files, credentials and private-key formats. Existing files are backed up before their first mutation in a run.
 
-`--parallel 1` applies in both modes. WSL snapshotting and checks are separate processes and can still use host resources.
+Verification runs on a filtered disposable snapshot, not the live project. The WSL/bubblewrap runner unshares networking, clears the environment, drops capabilities, applies file/time/output limits and executes the exact argv without a project-controlled shell. A success response is rejected unless required checks passed after the last write.
 
-### 2. Prepared project context
+## General host capability
 
-Before the local endpoint is started, project preflight resolves the directory and rejects task text larger than 32 KiB. Project profiling scans regular files without following symbolic links or Windows junctions. Its initial model manifest is capped at 500 entries. Repository/internal state, build output, virtual environments, caches, and common secret locations are excluded. If local Git is available, ChatMPD runs bounded local queries to obtain:
+General host inspection is deliberately separate from the project sandbox. `SystemInspector` exposes bounded OS, CPU, memory, disk and GPU evidence. Broad host mutations must pass the central risk doctrine; critical system/security/account/storage operations are not silently escalated.
 
-- repository root
-- branch or detached revision
-- parsed `owner/repository` identity from the `origin` URL, without credentials or the full URL
-- porcelain status
-- a small `HEAD` diff with external diff drivers disabled
+## ESO specialist
 
-Sensitive-path entries are removed from status and diff context. When the selected workspace is a repository subdirectory, a top-anchored literal Git pathspec limits status and diff to that subdirectory; selecting the repository root includes the whole repository. Git calls use `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, `GIT_OPTIONAL_LOCKS=0`, `--no-optional-locks`, and hidden Windows process flags. There is no fetch, pull, push, commit, checkout, branch creation, or pull-request operation.
+`EsoAddonManager` reads the ESO live directory, modern `.txt`/`.addon` manifests, `AddOnSettings.txt`, dependencies, Minion metadata and update evidence. Safe mutation paths create backups and refuse to run while ESO or Minion owns the relevant files. The specialist is designed to preserve required functionality and diagnose conflicts rather than blindly disable large addon sets.
 
-### 3. Verification selection
+## Vortex specialist
 
-The profiler supports Python only:
+`VortexInventory` reads version/game/profile/mod/snapshot metadata without parsing or modifying Vortex's live LevelDB. Mutation support is intentionally deferred until deployment/rollback semantics can be verified independently.
+## Media capability
 
-- If static AST inspection recognizes a direct `unittest.TestCase` or `unittest.IsolatedAsyncioTestCase` subclass with a `test*` method in a root-level `tests/test*.py` file, the required command is `[/usr/bin/python3, -m, unittest, discover, -s, tests]`.
-- Otherwise, if any `.py` file exists, the command is `[/usr/bin/python3, -m, compileall, -q, .]`.
-- Without a Python file, the service stops with an unsupported-project error.
+`MediaPipeline` normalizes one request into a backend-neutral plan. `MediaRuntime` manages a hidden ComfyUI process bound to `127.0.0.1:8188`, using shared storage below `D:\ChatMPD\media\ComfyUI-Shared`. It attaches safely to an already-running local ComfyUI server but stops only a process it owns.
 
-That exact list of arguments becomes both the allowlist and required completion gate. The model cannot add flags, choose a package manager, invoke a shell, or request another executable. The allowlisted `unittest` command can import and execute project-supplied Python test code, which is why the WSL/bubblewrap boundary remains essential.
+On Vader the runtime enables DynamicVRAM and two asynchronous offload streams. It refuses GPU media startup while `eso64.exe` is running.
 
-### 4. Model/agent loop
+Image generation uses a native Z-Image-Turbo workflow with an NVFP4 diffusion model, mixed-FP8 Qwen encoder and AE VAE. Video generation uses LTX-Video 2B distilled FP8 with an FP8 T5 encoder. Longer requests are decomposed into native temporal segments and identical-format segments are concatenated with FFmpeg.
 
-The local model first returns a plan. The engine then permits at most 50 turns. Each action is one of:
+The generic media adapter owns workflow mechanics, output discovery, segment planning and assembly. Supported-content boundaries remain part of the media doctrine and are not delegated to model permissiveness.
 
-- list a bounded project subtree
-- read one UTF-8 file
-- atomically create or replace one UTF-8 file
-- run the one exact verification argv
-- finish with success or failure
+## Mobile gateway
 
-Path validation rejects absolute paths, `..`, links, junctions, escapes, Windows reserved/alias forms, `.git`, `.chatmpd`, common secret directories, environment files, known credential files, and private key/certificate formats. Lists are bounded to 1,000 files and eight directory levels. Reads, writes, and pre-edit backups are each limited to 256 KiB.
+`MobileGateway` is a thin-client gateway; it does not run models on the phone. It serves a lightweight browser interface and authenticated JSON API. Pairing is one-time and short-lived. Device tokens are random; only SHA-256 token digests persist on Vader, and device records are revocable.
 
-Before replacing an existing file, the engine saves its original bytes once under the run's `backups/` tree. A temporary file plus `os.replace` makes the project replacement atomic on the same filesystem. There is no automatic rollback.
+The gateway accepts only loopback/private/link-local client addresses. llama.cpp and ComfyUI remain loopback-only behind it. ChatMPD never opens Windows Firewall automatically. The LAN gateway should be used only on a trusted private network; away-from-home access should use a private overlay rather than a public port forward.
 
-### 5. Offline snapshot verification
+## Resource coordination
 
-The sandbox runner creates a tar archive of regular safe files from the current project state. It does not follow links or junctions and excludes protected state, common secrets, caches, build output, environments, and known credential formats. Defaults are:
+When ESO is running, llama.cpp uses the existing CPU-safe/idle-priority mode and media GPU startup is denied. When ESO is not running, llama.cpp may use GPU offload. Model role switches stop the previous model first, and specialist routing releases the active language model before ComfyUI work.
 
-- 20,000 files maximum
-- 256 MiB total uncompressed file content
-- 64 MiB per file
+## Persistence
 
-The archive is streamed into the registered WSL distribution named `Ubuntu`. A temporary directory matching `/tmp/chatmpd-sandbox-<random-id>` is created with mode-restrictive defaults and removed on exit. bubblewrap then:
+Conversation history is stored under `%LOCALAPPDATA%\ChatMPD\conversations`. Mobile device digests are stored under `%LOCALAPPDATA%\ChatMPD\mobile`. Media runtime logs are under `%LOCALAPPDATA%\ChatMPD\media-runtime`. Coding audit/backups remain per-project under `.chatmpd/runs/<run-id>`.
+## Release boundaries
 
-- creates new user, PID, network, IPC, and UTS namespaces
-- drops all capabilities
-- mounts `/usr`, `/lib`, and `/lib64` read-only
-- supplies minimal `/proc` and `/dev`, empty system/home/run directories, and a temporary `/tmp`
-- binds only the extracted copy at `/work`
-- clears the inherited environment and supplies a small fixed environment
-- runs the exact argument vector without a shell around the project command
+The PyInstaller executable contains ChatMPD code and UI assets, including the canonical `MDRight-01.jpeg` derived Windows/PWA icons. Large GGUF, image and video model weights remain external on Vader and are discovered at runtime.
 
-The command has a 60-second task limit and a 64 KiB combined captured-output budget. A Windows-side timeout and process-tree cleanup provide an outer guard. WSL and the host remain trusted dependencies; the design does not claim virtualization-grade or perfect containment.
+The application is not a perfect sandbox or virtualization boundary. Windows, WSL, bubblewrap, llama.cpp, ComfyUI, FFmpeg and installed model files remain trusted dependencies. Evidence-based verification reduces risk but does not prove model output correct.
 
-### 6. Completion and persistence
+## Extension strategy
 
-The engine records required checks and the sequence number of each write. A success response is rejected unless every required check has exit code zero and occurred after the last write.
-
-Each attempt creates `.chatmpd/runs/<run-id>/` inside the selected project:
-
-- `run.json`: task, status, summary, changed paths, check argv/exit codes/sequences, hashes and byte counts, and event count
-- `events.jsonl`: event sequence, timestamps, plan metadata, permission decisions, tool names, write metadata, and hashes/byte counts for reads and command output
-- `backups/`: eligible original files, preserving project-relative paths
-
-Raw read contents and raw verification stdout/stderr are available to the in-memory model loop but are not written to the task record. The task and summary are stored as text. Records are local recovery/audit aids, not a secret store and not a transactional rollback journal.
-
-## Failure behavior
-
-- Missing llama.cpp/model files stop the task before model use.
-- Any already-healthy process on port `8080`, including another ChatMPD server, causes a refusal instead of takeover or borrowing.
-- An unavailable WSL/bubblewrap probe prevents verification and therefore success.
-- A bad tool request is reported back to the local model when safe; a permission violation stops the engine.
-- A failed or stale required check prevents successful completion.
-- Startup timeout, model/provider failure, sandbox rejection, turn exhaustion, and unexpected errors save a failed run record when the run directory already exists.
-- Runtime context cleanup attempts to stop only the llama.cpp process it started.
-
-Owner-facing recovery and symptom-specific steps are in [Troubleshooting](troubleshooting.md). The trust model and residual risks are in [Security](security.md).
+New models should be added through role/capability metadata rather than new UI modes. New specialists should implement a narrow handler behind the orchestrator and retain their own evidence, mutation and rollback rules. This keeps ChatMPD's user experience stable while its local capabilities evolve.

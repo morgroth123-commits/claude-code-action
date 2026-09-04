@@ -215,6 +215,25 @@ class LocalCodingModelTest(unittest.TestCase):
             },
         )
 
+    def test_accepts_one_redundant_brace_pair_from_qwen_tool_fallback(self) -> None:
+        provider = FakeProvider([
+            ChatResponse("1. Inspect the project", (), "stop"),
+            ChatResponse('{{"name":"list_files","arguments":{"path":"."}}}', (), "stop"),
+        ])
+        model = LocalCodingModel(provider, allowed_commands=[])
+        model.next_turn({"task": "Inspect", "events": [{"type": "run_created"}]})
+        turn = model.next_turn({
+            "task": "Inspect",
+            "events": [
+                {"type": "run_created"},
+                {"type": "model_turn"},
+                {"type": "plan_accepted"},
+            ],
+        })
+        self.assertEqual(turn, {
+            "kind": "tool", "name": "list_files", "arguments": {"path": "."}
+        })
+
     def test_allows_a_final_response_only_after_a_fresh_approved_check(self) -> None:
         check = ["/usr/bin/python3", "-m", "compileall", "-q", "."]
         provider = FakeProvider(
