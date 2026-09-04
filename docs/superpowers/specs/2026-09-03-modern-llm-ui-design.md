@@ -1,7 +1,7 @@
 # ChatMPD Modern LLM UI Design
 
 **Date:** 2026-09-03
-**Status:** Proposed for implementation
+**Status:** Approved for implementation
 
 ## Objective
 
@@ -130,6 +130,17 @@ Stop/cancel is cooperative and safety-aware:
 - coding stops between atomic tool operations and never during an atomic file replacement
 - media uses the backend interrupt mechanism where supported
 - cancellation never reports success and preserves any already-created recovery metadata
+
+## Mobile connection flow
+
+Mobile setup must be simple enough to complete without manually transcribing connection details.
+
+From the desktop Mobile access panel, starting mobile access displays:
+- **Copy setup link**: copies a short-lived, single-use URL containing the LAN address and temporary pairing code
+- **Copy address** and **Copy code** as explicit fallbacks
+- a QR code representing the same setup URL
+
+Opening the setup link on the phone pre-fills the pairing code and a reasonable device name; the user confirms with one **Pair this device** action. The temporary code is invalidated after successful exchange. The long-lived bearer credential is created only after pairing and is never embedded in the URL. Manual pairing remains available, and this flow must not change Windows Firewall or other Windows security settings.
 
 ## Security and privacy
 

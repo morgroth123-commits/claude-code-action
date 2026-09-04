@@ -13,6 +13,7 @@ from threading import RLock
 from typing import Any, Callable
 from uuid import uuid4
 
+from .conversation_library import ConversationLibrary
 from .doctrine import general_assistant_prompt
 from .llamacpp import LlamaCppProvider
 from .model_registry import ModelRole
@@ -46,10 +47,25 @@ class ConversationStore:
     def save(self, conversation_id: str, messages: list[dict[str, str]]) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
         destination = self.root / f"{conversation_id}.json"
+        now = datetime.now(UTC).isoformat()
+        existing: dict[str, Any] = {}
+        if destination.is_file():
+            try:
+                loaded = json.loads(destination.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    existing = loaded
+            except (OSError, json.JSONDecodeError):
+                existing = {}
+        title = str(existing.get("title") or "").strip()
+        if not title:
+            title = next((" ".join(item.get("content", "").split())[:64] for item in messages if item.get("role") == "user" and item.get("content", "").strip()), "New chat")
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "conversation_id": conversation_id,
-            "updated_at": datetime.now(UTC).isoformat(),
+            "title": title,
+            "pinned": bool(existing.get("pinned", False)),
+            "created_at": str(existing.get("created_at") or existing.get("updated_at") or now),
+            "updated_at": now,
             "messages": messages,
         }
         with tempfile.NamedTemporaryFile(
@@ -109,6 +125,15 @@ class DesktopAssistant:
             self._ensure_open()
             self._conversation_id = uuid4().hex
             self._messages = []
+            return self._conversation_id
+
+    def load_conversation(self, conversation_id: str) -> str:
+        with self._lock:
+            self._ensure_open()
+            root = getattr(self._store, "root", None)
+            document = ConversationLibrary(root).load(conversation_id)
+            self._conversation_id = document.conversation_id
+            self._messages = deepcopy(document.messages)
             return self._conversation_id
 
     def chat(self, text: str) -> ChatTurn:
