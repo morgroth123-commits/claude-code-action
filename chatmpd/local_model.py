@@ -270,14 +270,22 @@ class LocalCodingModel:
                 parse_constant=lambda unused: (_ for _ in ()).throw(ValueError()),
             )
         except (json.JSONDecodeError, ValueError):
-            if not (candidate.startswith("{{") and candidate.endswith("}}")):
-                return None
-            try:
-                decoded = json.loads(
-                    candidate[1:-1],
-                    parse_constant=lambda unused: (_ for _ in ()).throw(ValueError()),
-                )
-            except (json.JSONDecodeError, ValueError):
+            repairs: list[str] = []
+            if candidate.startswith("{{"):
+                repairs.append(candidate[1:])
+            if candidate.startswith("{{") and candidate.endswith("}}"):
+                repairs.append(candidate[1:-1])
+            decoded = None
+            for repaired in repairs:
+                try:
+                    decoded = json.loads(
+                        repaired,
+                        parse_constant=lambda unused: (_ for _ in ()).throw(ValueError()),
+                    )
+                    break
+                except (json.JSONDecodeError, ValueError):
+                    continue
+            if decoded is None:
                 return None
         if not isinstance(decoded, dict) or set(decoded) != {"name", "arguments"}:
             return None

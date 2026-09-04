@@ -319,5 +319,25 @@ class LocalCodingModelTest(unittest.TestCase):
         self.assertIn("could not complete", turn["summary"])
 
 
+    def test_accepts_single_extra_leading_brace_from_qwen_live_fallback(self) -> None:
+        provider = FakeProvider([
+            ChatResponse("1. Inspect the project", (), "stop"),
+            ChatResponse('{{"name":"read_file","arguments":{"path":"test_calc.py"}}', (), "stop"),
+        ])
+        model = LocalCodingModel(provider, allowed_commands=[])
+        model.next_turn({"task": "Inspect", "events": [{"type": "run_created"}]})
+        turn = model.next_turn({
+            "task": "Inspect",
+            "events": [
+                {"type": "run_created"},
+                {"type": "model_turn"},
+                {"type": "plan_accepted"},
+            ],
+        })
+        self.assertEqual(turn, {
+            "kind": "tool", "name": "read_file", "arguments": {"path": "test_calc.py"}
+        })
+
+
 if __name__ == "__main__":
     unittest.main()
