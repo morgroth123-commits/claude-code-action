@@ -490,6 +490,7 @@ const CONTROL_TITLES = {
   knowledge: ["Knowledge", "Local documents and retrieval"],
   capabilities: ["Skills & Tools", "Built-ins, extensions, packs, and mod sources"],
   models: ["Models", "Local models, LM Studio, and Bionic"],
+  performance: ["Performance", "Analyze and optimize Vader with reversible profiles"],
   workflows: ["Workflows", "Reusable local commands"],
   automations: ["Automations", "Recurring and conditional local tasks"],
   recovery: ["Recovery", "Reversible snapshots and rollback"],
@@ -643,6 +644,92 @@ async function renderModelsSection() {
   renderControlCards(cards);
 }
 
+async function renderPerformanceSection() {
+  const data = await api("/api/platform/performance");
+  const status = data.status || {};
+  const latest = data.latest || null;
+  const cards = [];
+  const modeCard = controlCard(
+    "Performance mode",
+    `${status.active_mode || "balanced"} · power plan ${status.current_power_plan_name || "unknown"}`
+  );
+  const actions = controlNode("div", "", "control-actions");
+  actions.append(controlAction("Analyze", async () => {
+    await api("/api/platform/performance/analyze", { method: "POST", body: "{}" });
+    await loadControlSection("performance");
+  }, "primary-button"));
+  for (const mode of ["balanced", "gaming", "ai"]) {
+    actions.append(controlAction(mode === "ai" ? "AI / ChatMPD" : mode[0].toUpperCase() + mode.slice(1), async () => {
+      await api("/api/platform/performance/apply", {
+        method: "POST", body: JSON.stringify({ mode }),
+      });
+      await loadControlSection("performance");
+    }));
+  }
+  actions.append(controlAction("Restore baseline", async () => {
+    await api("/api/platform/performance/restore", { method: "POST", body: "{}" });
+    await loadControlSection("performance");
+  }));
+  modeCard.append(actions);
+  modeCard.append(controlAction(
+    status.adaptive_enabled ? "Disable adaptive" : "Enable adaptive",
+    async () => {
+      await api("/api/platform/performance/adaptive", {
+        method: "POST",
+        body: JSON.stringify({
+          enabled: !status.adaptive_enabled,
+          base_mode: status.active_mode === "ai" ? "ai" : "balanced",
+        }),
+      });
+      await loadControlSection("performance");
+    }
+  ));
+  cards.push(modeCard);
+
+  if (latest) {
+    const scores = controlNode("div", "", "performance-score-grid");
+    for (const [label, value] of [
+      ["Overall", latest.overall_score], ["Gaming", latest.gaming_score],
+      ["AI", latest.ai_score], ["Balanced", latest.balanced_score],
+    ]) {
+      const card = controlCard(label);
+      card.classList.add("performance-score-card");
+      card.append(controlNode("div", `${value ?? "?"}/100`, "score-value"));
+      scores.append(card);
+    }
+    const scoreWrap = controlCard(`Current bottleneck: ${latest.bottleneck || "unknown"}`,
+      `Telemetry confidence ${Math.round((latest.telemetry_confidence || 0) * 100)}%`);
+    scoreWrap.append(scores);
+    cards.push(scoreWrap);
+  }
+  if (latest?.evidence) {
+    const evidence = latest.evidence;
+    const gpu = evidence.gpu || {};
+    cards.push(controlCard("Live evidence",
+      `CPU ${Math.round(evidence.cpu_percent || 0)}% · RAM ${Math.round(100 * (1 - (evidence.memory_available_bytes || 0) / Math.max(1, evidence.memory_total_bytes || 1)))}% used · ` +
+      `GPU ${gpu.utilization_percent ?? "?"}% · VRAM ${gpu.vram_used_mib ?? "?"}/${gpu.vram_total_mib ?? "?"} MiB · ` +
+      `Power ${evidence.power_plan_name || "unknown"}`));
+    for (const finding of latest.findings || []) {
+      cards.push(controlCard(`${String(finding.severity || "info").toUpperCase()} · ${finding.key}`, finding.summary || ""));
+    }
+    const competitors = latest.top_processes || [];
+    if (competitors.length) {
+      const text = competitors.slice(0, 8).map((item) =>
+        `${item.name} (PID ${item.pid}) · CPU ${Number(item.cpu_percent || 0).toFixed(1)}% · RAM ${Math.round((item.memory_bytes || 0) / 1048576)} MiB`
+      ).join("\n");
+      cards.push(controlCard("Top competing processes", text));
+    }
+  } else {
+    cards.push(controlCard("No baseline yet", "Run Analyze to measure Vader without changing anything."));
+  }
+
+  for (const item of (data.history || []).slice(1, 6)) {
+    cards.push(controlCard(`Previous analysis · ${item.overall_score}/100`,
+      `${item.created_at} · bottleneck ${item.bottleneck}`));
+  }
+  renderControlCards(cards);
+}
+
 async function renderWorkflowsSection() {
   const items = await api("/api/platform/workflows");
   const cards = [];
@@ -783,7 +870,7 @@ async function loadControlSection(section = "overview") {
     const renderers = {
       overview: renderOverviewSection, memory: renderMemorySection,
       knowledge: renderKnowledgeSection, capabilities: renderCapabilitiesSection,
-      models: renderModelsSection, workflows: renderWorkflowsSection,
+      models: renderModelsSection, performance: renderPerformanceSection, workflows: renderWorkflowsSection,
       automations: renderAutomationsSection, recovery: renderRecoverySection,
       prompts: renderPromptsSection, diagnostics: renderDiagnosticsSection,
       sharing: renderSharingSection,

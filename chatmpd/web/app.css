@@ -244,3 +244,12 @@ body.mobile-client #mobile-access { display: none; }
 .control-actions button { width: auto; }
 .control-empty { color: var(--muted); padding: 28px 8px; text-align: center; }
 body.mobile-client #control-center { display: none; }
+
+.performance-score-grid { display: grid; grid-template-columns: repeat(4, minmax(96px, 1fr)); gap: 10px; margin-top: 12px; }
+.performance-score-card { min-height: 92px; align-items: center; justify-content: center; text-align: center; }
+.score-value { margin-top: 8px; font-size: 24px; font-weight: 700; letter-spacing: -0.03em; }
+.control-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.control-item p { white-space: pre-line; }
+@media (max-width: 820px) {
+  .performance-score-grid { grid-template-columns: repeat(2, minmax(96px, 1fr)); }
+}

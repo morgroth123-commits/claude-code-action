@@ -80,3 +80,11 @@ In the modern WebView conversation composer, **Enter sends** and **Shift+Enter a
 ## Credentials
 
 Never put passwords, API keys, recovery phrases, private keys, or access tokens in ordinary prompts, reusable skills, or chat memory. Store optional connector credentials through ChatMPD's encrypted Secrets interface instead.
+
+## Performance Center
+
+Use **Control Center → Performance → Analyze** whenever you want a read-only snapshot of Vader. The dashboard shows overall/Gaming/AI/Balanced scores, the current bottleneck, GPU/VRAM telemetry when available, memory/storage headroom, power plan, workload state, and the top competing processes.
+
+Use **Gaming** before a demanding game if you want ChatMPD to release its owned model runtime and maintain the high-performance profile. Use **AI / ChatMPD** when the machine is dedicated to local inference/media. **Balanced** returns to the captured baseline plan, and **Restore baseline** explicitly reapplies the original plan recorded before optimization.
+
+Adaptive mode is useful when moving between ESO and ChatMPD work: it changes only on workload transitions and never terminates unrelated applications. Analyze-only is always non-mutating. Security, boot, firmware, disk, account, credential, and similarly critical changes are outside automatic performance optimization.

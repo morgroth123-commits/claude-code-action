@@ -23,6 +23,7 @@ from .model_lab import ModelBenchmarkStore, ModelInventory
 from .model_registry import ModelRegistry
 from .mod_sources import EsoUiCatalog, NexusModsCatalog
 from .packs import CapabilityPackManager
+from .performance import PerformanceAnalyzer, PerformanceCenter, PerformanceEvidence, PerformanceStore, VaderOptimizer
 from .permissions import PermissionProfileStore
 from .platform_db import PlatformDatabase
 from .platform_doctor import PlatformDoctor
@@ -48,6 +49,7 @@ _BUILTINS = (
     ("automation", "Local automation", "Persistent recurring and conditional local tasks."),
     ("voice", "Local voice", "Windows TTS and optional local Whisper transcription."),
     ("vision", "Local vision", "Managed screenshots and local-only vision routing."),
+    ("performance", "Performance Center", "Evidence-based Vader analysis and reversible optimization."),
 )
 
 @dataclass
@@ -79,6 +81,7 @@ class PlatformServices:
     lmstudio_installation: Any | None
     esoui: EsoUiCatalog
     nexus: NexusModsCatalog
+    performance: PerformanceCenter
     automation_scheduler: AutomationScheduler | None = None
 
     def bind_automation_runner(self, runner: Callable[[str], Any]) -> None:
@@ -88,6 +91,7 @@ class PlatformServices:
         self.automation_scheduler.start()
 
     def close(self) -> None:
+        self.performance.close()
         if self.automation_scheduler is not None:
             self.automation_scheduler.stop()
             self.automation_scheduler = None
@@ -151,6 +155,7 @@ class PlatformServices:
             "workflows": len(self.workflows.list()),
             "automations": len(self.automations.list()),
             "permission_profile": self.permissions.active_name(),
+            "performance": self.performance.status(),
             "hardware": self.hardware.as_dict(),
             "recommended_model_tier": recommend_model_tier(self.hardware),
             "local_models": len(self.models.registry.models),
@@ -173,6 +178,9 @@ def build_platform_services(
     paths: PlatformPaths | None = None,
     model_registry: ModelRegistry | None = None,
     hardware_probe: Callable[[], HardwareProfile | None] | None = None,
+    performance_probe: Callable[[], PerformanceEvidence] | None = None,
+    power_getter: Callable[[], tuple[str, str]] | None = None,
+    power_setter: Callable[[str], None] | None = None,
 ) -> PlatformServices:
     paths = paths or PlatformPaths.default()
     for folder in (paths.root, paths.extensions, paths.data, paths.attachments, paths.artifacts, paths.exports, paths.recovery):
@@ -214,6 +222,14 @@ def build_platform_services(
     permissions = PermissionProfileStore(database)
     secrets = SecretsVault(database)
     activity = ActivityLog(database)
+    performance_store = PerformanceStore(database)
+    performance_analyzer = PerformanceAnalyzer(performance_store, evidence_probe=performance_probe)
+    optimizer_kwargs = {"database": database, "permissions": permissions, "activity": activity}
+    if power_getter is not None:
+        optimizer_kwargs["power_getter"] = power_getter
+    if power_setter is not None:
+        optimizer_kwargs["power_setter"] = power_setter
+    performance = PerformanceCenter(performance_analyzer, VaderOptimizer(**optimizer_kwargs))
     voice = LocalVoice()
     vision = LocalVision(paths.artifacts / "screenshots")
     desktop = DesktopController(policy=permissions, enabled=False)
@@ -249,4 +265,5 @@ def build_platform_services(
         lmstudio_installation=installation,
         esoui=esoui,
         nexus=nexus,
+        performance=performance,
     )

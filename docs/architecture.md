@@ -59,3 +59,11 @@ The desktop shell is HTML/CSS/JS rendered in a native Edge WebView2 window. The 
 The mobile gateway serves the same frontend over a private network. Pairing uses a short-lived one-time code; only a token digest persists on Vader. Raw llama.cpp/LM Studio/ComfyUI endpoints are never exposed by the mobile gateway.
 
 `.chatmpdpack` export uses explicit include lists. Generic sharing excludes conversations, durable memory, credentials/tokens, authentication state, recovery data, machine-private state, and explicit-sex extensions. Large models remain external.
+
+## Performance Center
+
+`chatmpd.performance` is the host-performance subsystem. `PerformanceAnalyzer` collects bounded read-only Windows evidence plus optional `nvidia-smi` telemetry, normalizes it into Gaming/AI/Balanced/overall scores, persists reports, and identifies the lowest-headroom component without inventing missing telemetry.
+
+`VaderOptimizer` owns reversible profile changes. It captures the original power plan before the first mutation, routes host changes through `PermissionProfileStore`, logs activity evidence, and can restore the captured plan. Gaming mode also releases ChatMPD-owned model resources; AI mode favors local compute when no game is active; Analyze-only performs no writes.
+
+`AdaptivePerformanceController` polls at low frequency and switches only on workload transitions. The Performance Center is exposed through `PlatformServices`, loopback `/api/platform/performance` routes, and the WebView2 Control Center.

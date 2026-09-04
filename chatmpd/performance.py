@@ -11,6 +11,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -480,9 +481,144 @@ class AdaptivePerformanceController:
         self._workload_probe = workload_probe
         self.base_mode = str(base_mode).strip().casefold()
         self._last_mode: str | None = None
+
+    @property
+    def current_mode(self) -> str | None:
+        return self._last_mode
+
     def tick(self) -> str:
         mode = "gaming" if bool(self._workload_probe()) else self.base_mode
         if mode != self._last_mode:
             self.optimizer.apply(mode)
             self._last_mode = mode
         return mode
+
+
+def _eso_running() -> bool:
+    try:
+        completed = subprocess.run(
+            ["tasklist.exe", "/FI", "IMAGENAME eq eso64.exe", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=3, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return '"eso64.exe"' in completed.stdout.casefold()
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+class PerformanceCenter:
+    def __init__(
+        self,
+        analyzer: PerformanceAnalyzer,
+        optimizer: VaderOptimizer,
+        *,
+        workload_probe: Callable[[], bool] = _eso_running,
+        poll_seconds: float = 30.0,
+    ) -> None:
+        self.analyzer = analyzer
+        self.optimizer = optimizer
+        self._workload_probe = workload_probe
+        self._poll_seconds = max(5.0, min(float(poll_seconds), 300.0))
+        self._adaptive_enabled = False
+        self._base_mode = "balanced"
+        self._controller = AdaptivePerformanceController(
+            optimizer, workload_probe=workload_probe, base_mode=self._base_mode
+        )
+        self._last_optimization: dict[str, Any] | None = None
+        self._stop = Event()
+        self._thread: Thread | None = None
+    def analyze(self) -> PerformanceReport:
+        return self.analyzer.analyze()
+
+    def history(self, *, limit: int = 50) -> tuple[PerformanceReport, ...]:
+        return self.analyzer.store.list(limit=limit)
+
+    def apply(self, mode: str, *, confirmed: bool = False) -> OptimizationResult:
+        clean = str(mode).strip().casefold()
+        before = self.analyze() if clean != "analyze" else None
+        if clean != "gaming":
+            self._base_mode = clean if clean in {"balanced", "ai"} else self._base_mode
+        result = self.optimizer.apply(clean, confirmed=confirmed)
+        if before is not None:
+            after = self.analyze()
+            self._last_optimization = {
+                "mode": clean, "before_report_id": before.report_id,
+                "after_report_id": after.report_id,
+                "before_score": before.overall_score, "after_score": after.overall_score,
+                "score_delta": after.overall_score - before.overall_score,
+            }
+        return result
+
+    def restore(self, *, confirmed: bool = False) -> OptimizationResult:
+        self._base_mode = "balanced"
+        return self.optimizer.restore(confirmed=confirmed)
+
+    def bind_runtime(self, release_runtime: Callable[[], None]) -> None:
+        self.optimizer.bind_runtime(release_runtime)
+
+    def status(self) -> dict[str, Any]:
+        return {
+            **self.optimizer.status(),
+            "adaptive_enabled": self._adaptive_enabled,
+            "adaptive_base_mode": self._base_mode,
+            "history_count": len(self.history(limit=500)),
+            "last_optimization": self._last_optimization,
+        }
+
+    def set_adaptive(
+        self, enabled: bool, *, base_mode: str = "balanced", start_thread: bool = True
+    ) -> dict[str, Any]:
+        clean_base = str(base_mode).strip().casefold()
+        if clean_base not in {"balanced", "ai"}:
+            raise ValueError("Adaptive base mode must be balanced or ai.")
+        if not enabled:
+            previous_mode = self._controller.current_mode
+            self._adaptive_enabled = False
+            if previous_mode == "gaming":
+                self.optimizer.apply(self._base_mode)
+            self._stop_thread()
+            return self.status()
+        self._base_mode = clean_base
+        self._controller = AdaptivePerformanceController(
+            self.optimizer, workload_probe=self._workload_probe, base_mode=clean_base
+        )
+        self._adaptive_enabled = True
+        if start_thread and (self._thread is None or not self._thread.is_alive()):
+            self._stop.clear()
+            self._thread = Thread(
+                target=self._adaptive_loop,
+                name="ChatMPD performance adaptive controller",
+                daemon=True,
+            )
+            self._thread.start()
+        return self.status()
+
+    def tick_adaptive(self) -> str:
+        if not self._adaptive_enabled:
+            return self._base_mode
+        return self._controller.tick()
+
+    def close(self) -> None:
+        self._adaptive_enabled = False
+        self._stop_thread()
+
+    def _adaptive_loop(self) -> None:
+        while not self._stop.wait(self._poll_seconds):
+            if not self._adaptive_enabled:
+                return
+            try:
+                self.tick_adaptive()
+            except Exception as error:
+                activity = getattr(self.optimizer, "activity", None)
+                if activity is not None:
+                    activity.record(
+                        "performance", "Adaptive performance check failed.",
+                        details={"error": f"{type(error).__name__}: {error}"[:300]},
+                    )
+
+    def _stop_thread(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        self._thread = None
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)

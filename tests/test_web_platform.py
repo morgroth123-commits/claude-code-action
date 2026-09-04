@@ -8,6 +8,7 @@ from pathlib import Path
 
 from chatmpd.conversation_library import ConversationLibrary
 from chatmpd.model_registry import ModelRegistry
+from chatmpd.performance import PerformanceEvidence
 from chatmpd.platform_paths import PlatformPaths
 from chatmpd.platform_services import build_platform_services
 from chatmpd.web_service import WebAppService
@@ -28,10 +29,14 @@ class WebPlatformTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
+        self.power_guid = "baseline-guid"
+        evidence = PerformanceEvidence(20.0, 16*1024**3, 12*1024**3, 100*1024**3, 50*1024**3, {}, (), "baseline-guid", "Balanced", ())
+        def set_power(guid): self.power_guid = guid
         self.services = build_platform_services(
             paths=PlatformPaths(root / "platform"),
             model_registry=ModelRegistry(()),
-            hardware_probe=lambda: None,
+            hardware_probe=lambda: None, performance_probe=lambda: evidence,
+            power_getter=lambda: (self.power_guid, "Test plan"), power_setter=set_power,
         )
         assets = root / "web"
         assets.mkdir()
@@ -91,6 +96,23 @@ class WebPlatformTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("checks", doctor)
 
+
+    def test_performance_analysis_profiles_restore_and_adaptive_surfaces(self) -> None:
+        status, initial = self.request("GET", "/api/platform/performance")
+        self.assertEqual(status, 200)
+        self.assertEqual(initial["status"]["active_mode"], "balanced")
+        status, report = self.request("POST", "/api/platform/performance/analyze", {})
+        self.assertEqual(status, 200)
+        self.assertIn("overall_score", report)
+        status, applied = self.request("POST", "/api/platform/performance/apply", {"mode": "gaming"})
+        self.assertEqual(status, 200)
+        self.assertEqual(applied["mode"], "gaming")
+        status, adaptive = self.request("POST", "/api/platform/performance/adaptive", {"enabled": True, "base_mode": "ai", "start_thread": False})
+        self.assertEqual(status, 200)
+        self.assertTrue(adaptive["adaptive_enabled"])
+        status, restored = self.request("POST", "/api/platform/performance/restore", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(restored["power_plan_guid"], "baseline-guid")
 
 if __name__ == "__main__":
     unittest.main()

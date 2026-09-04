@@ -239,6 +239,7 @@ def build_default_orchestrator() -> ChatMPDOrchestrator:
         context_provider=services.retrieval_context,
     )
     media = DefaultMediaSpecialist()
+    services.performance.bind_runtime(assistant.release_runtime)
 
     def eso_handler(_text: str) -> dict[str, Any]:
         return eso_scan_summary(EsoAddonManager().scan())

@@ -71,3 +71,11 @@ Generic `.chatmpdpack` exports use explicit include paths and exclude conversati
 ## License
 
 ChatMPD is licensed under the [MIT License](LICENSE). Third-party software, services, repositories, and models retain their own licenses and terms.
+
+## Performance Center
+
+Control Center → **Performance** analyzes Vader without changing it, scores Gaming, AI, Balanced, and overall headroom, identifies the current bottleneck, and shows bounded process/GPU/RAM/storage/power evidence. Reports are retained locally so optimizations can be compared against a before/after baseline.
+
+Available modes are **Analyze only**, **Balanced**, **Gaming**, and **AI / ChatMPD**. Automatic changes are deliberately limited to reversible Windows power-plan selection and ChatMPD-owned runtime coordination. Adaptive mode can protect ESO when `eso64.exe` appears and restore the selected base mode after the game exits.
+
+Performance optimization never disables Windows security, changes BIOS/firmware/boot/disk settings, uses realtime priority, or kills unrelated user processes. **Restore baseline** re-applies the captured original power plan.

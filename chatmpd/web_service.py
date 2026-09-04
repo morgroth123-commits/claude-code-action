@@ -168,6 +168,36 @@ class WebAppService:
             if section == "summary" and request.command == "GET":
                 self._json(request, 200, services.summary())
                 return
+            if section == "performance":
+                if request.command == "GET":
+                    history = services.performance.history(limit=20)
+                    self._json(request, 200, {
+                        "status": services.performance.status(),
+                        "history": [asdict(item) for item in history],
+                        "latest": None if not history else asdict(history[0]),
+                    })
+                    return
+                if request.command == "POST" and len(segments) == 2 and segments[1] == "analyze":
+                    self._json(request, 200, asdict(services.performance.analyze()))
+                    return
+                if request.command == "POST" and len(segments) == 2 and segments[1] == "apply":
+                    payload = self._read_json(request)
+                    result = services.performance.apply(str(payload.get("mode", "")), confirmed=bool(payload.get("confirmed", False)))
+                    self._json(request, 200, asdict(result))
+                    return
+                if request.command == "POST" and len(segments) == 2 and segments[1] == "restore":
+                    payload = self._read_json(request)
+                    self._json(request, 200, asdict(services.performance.restore(confirmed=bool(payload.get("confirmed", False)))))
+                    return
+                if request.command == "POST" and len(segments) == 2 and segments[1] == "adaptive":
+                    payload = self._read_json(request)
+                    result = services.performance.set_adaptive(
+                        bool(payload.get("enabled", False)),
+                        base_mode=str(payload.get("base_mode") or "balanced"),
+                        start_thread=bool(payload.get("start_thread", True)),
+                    )
+                    self._json(request, 200, result)
+                    return
             if section == "memory":
                 if request.command == "GET":
                     self._json(request, 200, [asdict(item) for item in services.memory.list()])

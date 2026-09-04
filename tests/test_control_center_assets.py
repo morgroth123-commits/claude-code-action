@@ -14,7 +14,8 @@ class ControlCenterAssetTest(unittest.TestCase):
             'id="control-center"', 'id="control-dialog"',
             'data-control-section="overview"', 'data-control-section="memory"',
             'data-control-section="knowledge"', 'data-control-section="capabilities"',
-            'data-control-section="models"', 'data-control-section="workflows"',
+            'data-control-section="models"', 'data-control-section="performance"',
+            'data-control-section="workflows"',
             'data-control-section="automations"', 'data-control-section="recovery"',
             'data-control-section="prompts"', 'data-control-section="diagnostics"',
             'data-control-section="sharing"',
@@ -26,6 +27,10 @@ class ControlCenterAssetTest(unittest.TestCase):
         self.assertIn("openControlCenter", script)
         self.assertIn("loadControlSection", script)
         self.assertIn("/api/platform/", script)
+        self.assertIn("renderPerformanceSection", script)
+        self.assertIn("/api/platform/performance", script)
+        self.assertIn("gaming", script)
+        self.assertIn("adaptive", script)
         self.assertIn("textContent", script)
         self.assertNotIn("innerHTML", script)
 

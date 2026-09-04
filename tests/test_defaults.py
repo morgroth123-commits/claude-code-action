@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import inspect
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
 from chatmpd.defaults import (
+    build_default_orchestrator,
     eso_scan_summary,
     system_snapshot_summary,
     vortex_report_summary,
@@ -60,6 +62,10 @@ class DefaultSpecialistSummaryTest(unittest.TestCase):
         self.assertEqual(summary["disk_free_gib"], 400.0)
         self.assertEqual(summary["gpu"]["name"], "RTX 3060")
 
+
+    def test_default_orchestrator_binds_performance_runtime_release(self) -> None:
+        source = inspect.getsource(build_default_orchestrator)
+        self.assertIn("services.performance.bind_runtime(assistant.release_runtime)", source)
 
 if __name__ == "__main__":
     unittest.main()

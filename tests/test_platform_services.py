@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from chatmpd.model_registry import ModelRegistry
+from chatmpd.performance import PerformanceEvidence
 from chatmpd.platform_paths import PlatformPaths
 from chatmpd.platform_services import build_platform_services
 
@@ -47,6 +48,23 @@ class PlatformServicesTest(unittest.TestCase):
             self.assertIn("capabilities", summary)
             self.assertIn("bionic", summary)
 
+
+    def test_performance_center_is_constructed_with_injected_probes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = PerformanceEvidence(
+                10.0, 16 * 1024**3, 12 * 1024**3,
+                100 * 1024**3, 50 * 1024**3, {}, (), "guid", "Balanced", (),
+            )
+            services = build_platform_services(
+                paths=PlatformPaths(Path(directory)), model_registry=ModelRegistry(()),
+                hardware_probe=lambda: None, performance_probe=lambda: evidence,
+                power_getter=lambda: ("guid", "Balanced"), power_setter=lambda _guid: None,
+            )
+            report = services.performance.analyze()
+            self.assertGreater(report.overall_score, 0)
+            self.assertIn("performance", services.summary())
+            self.assertEqual(services.summary()["performance"]["history_count"], 1)
+            services.close()
 
 if __name__ == "__main__":
     unittest.main()

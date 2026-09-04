@@ -8,6 +8,7 @@ from chatmpd.activity import ActivityLog
 from chatmpd.performance import (
     AdaptivePerformanceController,
     PerformanceAnalyzer,
+    PerformanceCenter,
     PerformanceEvidence,
     PerformanceStore,
     ProcessPressure,
@@ -72,6 +73,51 @@ class PerformanceAnalyzerTest(unittest.TestCase):
             self.assertIsInstance(report.ai_score, int)
             self.assertNotEqual(report.bottleneck, "gpu")
 
+
+class PerformanceCenterTest(unittest.TestCase):
+    def test_status_history_and_adaptive_tick_are_exposed(self) -> None:
+        class Analyzer:
+            def analyze(self): return "report"
+            store = type("Store", (), {"list": lambda self, limit=50: ("old",)})()
+        class Optimizer:
+            def __init__(self): self.calls = []
+            def status(self): return {"active_mode": "balanced"}
+            def apply(self, mode, confirmed=False): self.calls.append(mode); return mode
+            def restore(self, confirmed=False): return "restored"
+            def bind_runtime(self, callback): self.callback = callback
+        game = {"running": False}
+        optimizer = Optimizer()
+        center = PerformanceCenter(Analyzer(), optimizer, workload_probe=lambda: game["running"], poll_seconds=60)
+        self.assertEqual(center.analyze(), "report")
+        self.assertEqual(center.history(), ("old",))
+        self.assertFalse(center.status()["adaptive_enabled"])
+        center.set_adaptive(True, base_mode="ai", start_thread=False)
+        self.assertEqual(center.tick_adaptive(), "ai")
+        game["running"] = True
+        self.assertEqual(center.tick_adaptive(), "gaming")
+        center.set_adaptive(False)
+        self.assertFalse(center.status()["adaptive_enabled"])
+        self.assertEqual(optimizer.calls[-1], "ai")
+
+    def test_manual_profile_records_before_after_score_delta(self) -> None:
+        reports = iter([
+            type("Report", (), {"overall_score": 50, "report_id": "before"})(),
+            type("Report", (), {"overall_score": 68, "report_id": "after"})(),
+        ])
+        class Analyzer:
+            def analyze(self): return next(reports)
+            store = type("Store", (), {"list": lambda self, limit=50: ()})()
+        class Optimizer:
+            def status(self): return {"active_mode": "balanced"}
+            def apply(self, mode, confirmed=False): return type("Result", (), {"mode": mode})()
+            def restore(self, confirmed=False): return type("Result", (), {"mode": "restored"})()
+            def bind_runtime(self, callback): pass
+        center = PerformanceCenter(Analyzer(), Optimizer(), workload_probe=lambda: False)
+        center.apply("ai")
+        comparison = center.status()["last_optimization"]
+        self.assertEqual(comparison["before_score"], 50)
+        self.assertEqual(comparison["after_score"], 68)
+        self.assertEqual(comparison["score_delta"], 18)
 
 class VaderOptimizerTest(unittest.TestCase):
     def test_modes_are_reversible_and_analyze_never_mutates(self) -> None:
