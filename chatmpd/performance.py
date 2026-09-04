@@ -154,7 +154,7 @@ class PerformanceAnalyzer:
                      if key not in {"gpu", "vram"} or evidence.gpu}
         if available:
             lowest = min(available, key=available.get)
-            bottleneck = lowest if available[lowest] < 50.0 else "none"
+            bottleneck = lowest if available[lowest] < 35.0 else "none"
         else:
             bottleneck = "unknown"
         findings = self._findings(components, evidence)

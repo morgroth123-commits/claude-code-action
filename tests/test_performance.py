@@ -356,3 +356,22 @@ class PerformanceBottleneckSemanticsTest(unittest.TestCase):
                                          evidence_probe=lambda: evidence).analyze()
             self.assertEqual(report.bottleneck, "none")
             self.assertEqual(report.findings, ())
+
+
+class PerformanceModeratePressureTest(unittest.TestCase):
+    def test_moderate_commit_pressure_is_not_called_an_active_bottleneck(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            database = PlatformDatabase(Path(folder) / "platform.db")
+            evidence = PerformanceEvidence(
+                cpu_percent=35, memory_total_bytes=32*GIB, memory_available_bytes=16*GIB,
+                disk_total_bytes=500*GIB, disk_free_bytes=200*GIB,
+                gpu={"utilization_percent": 20, "vram_total_mib": 12288,
+                     "vram_used_mib": 2500}, processes=(),
+                power_plan_guid=HIGH_PERFORMANCE, power_plan_name="High performance",
+                workloads=(), commit_percent=59, pagefile_percent=3,
+                disk_active_percent=5, disk_queue_length=0,
+            )
+            report = PerformanceAnalyzer(
+                PerformanceStore(database), evidence_probe=lambda: evidence
+            ).analyze()
+            self.assertEqual(report.bottleneck, "none")

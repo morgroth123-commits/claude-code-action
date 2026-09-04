@@ -1,4 +1,4 @@
-# ChatMPD 0.3.3
+# ChatMPD 0.3.4
 
 ChatMPD is a local-first autonomous Windows assistant with a modern WebView2 conversation UI, persistent chats and memory, extensible skills/plugins/tools, local model routing, verified coding, ESO/Vortex specialists, local media, mobile access, workflows/automation, and sanitized sharing.
 
