@@ -111,7 +111,7 @@ class WebAppService:
         if request.command == "GET" and path in {"/", "/index.html"}:
             self._serve_asset(request, "index.html")
             return
-        if request.command == "GET" and path in {"/app.css", "/app.js"}:
+        if request.command == "GET" and path in {"/app.css", "/app.js", "/chatmpd-192.png", "/chatmpd-512.png"}:
             self._serve_asset(request, path.lstrip("/"))
             return
         if path == "/api/conversations" and request.command == "GET":
@@ -316,7 +316,7 @@ class WebAppService:
         return payload
 
     def _serve_asset(self, request: BaseHTTPRequestHandler, name: str) -> None:
-        if name not in {"index.html", "app.css", "app.js"}:
+        if name not in {"index.html", "app.css", "app.js", "chatmpd-192.png", "chatmpd-512.png"}:
             self._json(request, 404, {"error": "asset not found"})
             return
         path = self.assets_root / name

@@ -58,6 +58,7 @@ class WebServiceTest(unittest.TestCase):
         self.assets = root / "web"
         self.assets.mkdir()
         (self.assets / "index.html").write_text("<main>ChatMPD modern shell</main>", encoding="utf-8")
+        (self.assets / "chatmpd-192.png").write_bytes(b"png")
         self.library = ConversationLibrary(root / "conversations")
         self.orchestrator = _Orchestrator()
         self.service = WebAppService(
@@ -100,6 +101,9 @@ class WebServiceTest(unittest.TestCase):
         status, page = self._request("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn("modern shell", page)
+        status, icon = self._request("GET", "/chatmpd-192.png")
+        self.assertEqual(status, 200)
+        self.assertEqual(icon, "png")
 
         status, created = self._request("POST", "/api/conversations", {})
         self.assertEqual(status, 201)

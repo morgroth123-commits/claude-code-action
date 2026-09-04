@@ -45,9 +45,9 @@ def dispatch(
         return 0
     if universal_launcher is None:
         from .defaults import build_default_orchestrator
-        from .universal_gui import launch_universal_gui
+        from .webview_host import launch_webview
 
-        universal_launcher = lambda: launch_universal_gui(build_default_orchestrator())
+        universal_launcher = lambda: launch_webview(build_default_orchestrator())
     universal_launcher()
     return 0
 
