@@ -61,3 +61,19 @@ class PackagingDefinitionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DesktopPackagingExtrasTest(unittest.TestCase):
+    def test_optional_desktop_and_document_extras_cover_packaged_features(self) -> None:
+        import tomllib
+        root = Path(__file__).resolve().parents[1]
+        with (root / "pyproject.toml").open("rb") as handle:
+            metadata = tomllib.load(handle)
+        optional = metadata["project"]["optional-dependencies"]
+        desktop = " ".join(optional["desktop"]).casefold()
+        documents = " ".join(optional["documents"]).casefold()
+        self.assertIn("pywebview", desktop)
+        self.assertIn("qrcode", desktop)
+        self.assertIn("pillow", desktop)
+        self.assertIn("pypdf", documents)
+        self.assertIn("openpyxl", documents)
