@@ -1,0 +1,5 @@
+[pack]
+id = "eso"
+name = "ESO"
+description = "ESO addon diagnostics, Minion local-state analysis, and ESOUI catalog references."
+capabilities = ["eso", "esoui", "knowledge", "workflows", "recovery"]

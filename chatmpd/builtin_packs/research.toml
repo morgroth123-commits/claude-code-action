@@ -1,0 +1,5 @@
+[pack]
+id = "research"
+name = "Research"
+description = "Local knowledge, retrieval, prompt guidance, memory, and evidence workflows."
+capabilities = ["chat", "knowledge", "memory", "prompts", "agents"]

@@ -1,0 +1,5 @@
+[pack]
+id = "modding"
+name = "Modding"
+description = "Read-only mod-manager analysis, repository sources, and conflict workflows."
+capabilities = ["vortex", "mod-sources", "workflows", "recovery"]

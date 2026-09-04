@@ -1,0 +1,5 @@
+[pack]
+id = "developer"
+name = "Developer"
+description = "Verified coding, repository analysis, model evaluation, and developer workflows."
+capabilities = ["coding", "workflows", "models", "knowledge", "extensions"]

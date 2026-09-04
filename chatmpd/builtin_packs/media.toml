@@ -1,0 +1,5 @@
+[pack]
+id = "media"
+name = "Media"
+description = "Local image and video generation plus artifact handling."
+capabilities = ["media", "attachments", "artifacts", "vision"]

@@ -1,0 +1,5 @@
+[pack]
+id = "windows"
+name = "Windows Diagnostics"
+description = "Local Windows diagnostics, recovery, automation, and permission-aware tools."
+capabilities = ["system", "doctor", "recovery", "automation", "desktop"]
