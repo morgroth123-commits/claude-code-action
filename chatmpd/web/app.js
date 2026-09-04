@@ -292,7 +292,7 @@ async function submitMobileCommand(text) {
   const payload = { text, conversation_id: state.activeConversation };
   if (state.workspace) payload.workspace = state.workspace;
   state.activeJob = "mobile-request";
-  setBusy(true, "Working on Vader");
+  setBusy(true, "Working locally");
   try {
     const result = await api("/api/command", {
       method: "POST",
@@ -404,10 +404,10 @@ function renderResult(result) {
 }
 
 function chooseWorkspace() {
-  const value = window.prompt("Project folder on Vader", state.workspace || "C:\\Users\\Owner\\Documents");
+  const value = window.prompt("Project folder on this PC", state.workspace || "");
   if (value === null) return;
   state.workspace = value.trim();
-  $("project-label").textContent = state.workspace || "Local on Vader";
+  $("project-label").textContent = state.workspace || "Local on this PC";
   $("workspace-chip").textContent = state.workspace;
   $("workspace-chip").hidden = !state.workspace;
 }
@@ -490,7 +490,7 @@ const CONTROL_TITLES = {
   knowledge: ["Knowledge", "Local documents and retrieval"],
   capabilities: ["Skills & Tools", "Built-ins, extensions, packs, and mod sources"],
   models: ["Models", "Local models, LM Studio, and Bionic"],
-  performance: ["Performance", "Analyze and optimize Vader with reversible profiles"],
+  performance: ["Performance", "Analyze and optimize this PC with reversible profiles"],
   workflows: ["Workflows", "Reusable local commands"],
   automations: ["Automations", "Recurring and conditional local tasks"],
   recovery: ["Recovery", "Reversible snapshots and rollback"],
@@ -744,7 +744,7 @@ async function renderPerformanceSection() {
       cards.push(controlCard("Top competing processes", text));
     }
   } else {
-    cards.push(controlCard("No baseline yet", "Run Analyze to measure Vader without changing anything."));
+    cards.push(controlCard("No baseline yet", "Run Analyze to measure this PC without changing anything."));
   }
 
   for (const item of (data.history || []).slice(1, 6)) {

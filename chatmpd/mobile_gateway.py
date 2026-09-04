@@ -380,11 +380,11 @@ button.secondary{background:#222;border-color:#444}.row{display:grid;grid-templa
 pre{white-space:pre-wrap;word-break:break-word;background:#0b0b0b;padding:12px;border-radius:12px;min-height:70px}
 @media(max-width:520px){.row{grid-template-columns:1fr}}
 </style></head><body><main>
-<header><img src="/icon-192.png" alt="ChatMPD"><div><h1>ChatMPD</h1><div class="muted">Vader-powered local assistant</div></div></header>
-<div class="card" id="pair"><strong>Pair this device</strong><p class="muted">Enter the one-time code shown by ChatMPD on Vader.</p>
+<header><img src="/icon-192.png" alt="ChatMPD"><div><h1>ChatMPD</h1><div class="muted">Local assistant</div></div></header>
+<div class="card" id="pair"><strong>Pair this device</strong><p class="muted">Enter the one-time code shown by ChatMPD on your PC.</p>
 <input id="code" inputmode="numeric" maxlength="8" placeholder="Pairing code"><input id="device" placeholder="Device name" value="My phone"><button onclick="pair()">Pair device</button></div>
 <div class="card"><strong>Command</strong><textarea id="text" placeholder="Tell ChatMPD what you want done..."></textarea>
-<input id="workspace" placeholder="Optional project folder on Vader"><button onclick="sendCommand()">Send to ChatMPD</button></div>
+<input id="workspace" placeholder="Optional project folder on this PC"><button onclick="sendCommand()">Send to ChatMPD</button></div>
 <div class="card"><div class="row"><button class="secondary" onclick="status()">Refresh status</button><button class="secondary" onclick="forget()">Forget this device</button></div><pre id="result">Ready.</pre></div>
 <script>
 const tokenKey='chatmpd-device-token';const result=document.getElementById('result');
@@ -392,9 +392,9 @@ function token(){return localStorage.getItem(tokenKey)||''}
 function show(v){result.textContent=typeof v==='string'?v:JSON.stringify(v,null,2)}
 async function api(path,options={}){const headers={'Content-Type':'application/json',...(options.headers||{})};if(token())headers.Authorization='Bearer '+token();const r=await fetch(path,{...options,headers});const data=await r.json();if(!r.ok)throw new Error(data.error||('HTTP '+r.status));return data}
 async function pair(){try{const data=await api('/api/pair',{method:'POST',body:JSON.stringify({code:document.getElementById('code').value,device_name:document.getElementById('device').value})});localStorage.setItem(tokenKey,data.token);show('Paired as '+data.device_name);document.getElementById('pair').hidden=true}catch(e){show(e.message)}}
-async function sendCommand(){try{show('Working on Vader...');const body={text:document.getElementById('text').value};const w=document.getElementById('workspace').value.trim();if(w)body.workspace=w;show(await api('/api/command',{method:'POST',body:JSON.stringify(body)}))}catch(e){show(e.message)}}
+async function sendCommand(){try{show('Working locally...');const body={text:document.getElementById('text').value};const w=document.getElementById('workspace').value.trim();if(w)body.workspace=w;show(await api('/api/command',{method:'POST',body:JSON.stringify(body)}))}catch(e){show(e.message)}}
 async function status(){try{show(await api('/api/status'))}catch(e){show(e.message)}}
-function forget(){localStorage.removeItem(tokenKey);document.getElementById('pair').hidden=false;show('Device credential removed from this phone. Revoke it on Vader to invalidate it server-side.')}
+function forget(){localStorage.removeItem(tokenKey);document.getElementById('pair').hidden=false;show('Device credential removed from this phone. Revoke it in ChatMPD to invalidate it server-side.')}
 if(token())document.getElementById('pair').hidden=true;
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
 </script></main></body></html>"""

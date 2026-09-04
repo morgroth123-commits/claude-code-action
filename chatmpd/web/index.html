@@ -12,8 +12,8 @@
 <section id="mobile-pair-screen" class="pair-screen" hidden aria-labelledby="pair-screen-title">
   <div class="pair-card">
     <img src="/chatmpd-192.png" alt="" class="pair-icon">
-    <h1 id="pair-screen-title">Connect to Vader</h1>
-    <p>Pair this device once. Your chats and model work stay on Vader.</p>
+    <h1 id="pair-screen-title">Connect to ChatMPD</h1>
+    <p>Pair this device once. Your chats and model work stay on your PC.</p>
     <label>Device name<input id="mobile-device-name" maxlength="80" value="My phone" autocomplete="nickname"></label>
     <label>Pairing code<input id="mobile-pair-code" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="000000"></label>
     <button id="pair-device-button" class="primary-button" type="button">Pair this device</button>
@@ -61,7 +61,7 @@
       <section id="welcome" class="welcome-state">
         <img src="/chatmpd-192.png" alt="" class="welcome-icon">
         <h1>How can I help?</h1>
-        <p>Ask anything, work on a project, inspect Vader, manage ESO or Vortex, or create local media.</p>
+        <p>Ask anything, work on a project, inspect this PC, manage ESO or Vortex, or create local media.</p>
       </section>
       <div id="messages" class="messages"></div>
       <div id="working" class="working-row" hidden role="status" aria-live="polite">
@@ -74,7 +74,7 @@
         <div class="composer-tools">
           <div class="composer-left">
             <button id="project-button" class="round-button" type="button" aria-label="Choose project folder">＋</button>
-            <span id="project-label" class="composer-hint">Local on Vader</span>
+            <span id="project-label" class="composer-hint">Local on this PC</span>
           </div>
           <button id="send" class="send-button" type="submit" aria-label="Send message">↑</button>
           <button id="stop" class="send-button stop-button" type="button" aria-label="Stop current task" hidden>■</button>
@@ -97,7 +97,7 @@
 <dialog id="mobile-dialog" class="modal" aria-labelledby="mobile-title">
   <form method="dialog" class="modal-card">
     <div class="modal-heading">
-      <div><h2 id="mobile-title">Connect your phone</h2><p>Use ChatMPD on your phone while Vader does the computing.</p></div>
+      <div><h2 id="mobile-title">Connect your phone</h2><p>Use ChatMPD on your phone while this PC does the computing.</p></div>
       <button class="icon-button" value="cancel" aria-label="Close">×</button>
     </div>
     <div id="mobile-off" class="modal-section">
