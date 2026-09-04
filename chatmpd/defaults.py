@@ -89,6 +89,34 @@ def system_snapshot_summary(snapshot: Any) -> dict[str, Any]:
     }
 
 
+def performance_command_summary(center: Any, text: str) -> dict[str, Any]:
+    prompt = str(text).strip().casefold()
+    if any(token in prompt for token in ("restore", "revert", "baseline")):
+        result = center.restore()
+        return {"summary": result.message, "mode": result.mode, "changed": result.changed}
+    if "adaptive" in prompt:
+        enabled = not any(token in prompt for token in ("disable", "off", "stop"))
+        base = "ai" if any(token in prompt for token in (" ai ", "chatmpd")) else "balanced"
+        status = center.set_adaptive(enabled, base_mode=base)
+        return {"summary": f"Adaptive performance {'enabled' if enabled else 'disabled'}.", **status}
+    if any(token in prompt for token in ("gaming", "game mode", "for games", "for gaming")):
+        result = center.apply("gaming")
+        return {"summary": result.message, "mode": result.mode, "changed": result.changed}
+    if any(token in prompt for token in ("ai mode", "ai performance", "for ai", "chatmpd performance")):
+        result = center.apply("ai")
+        return {"summary": result.message, "mode": result.mode, "changed": result.changed}
+    if "balanced" in prompt:
+        result = center.apply("balanced")
+        return {"summary": result.message, "mode": result.mode, "changed": result.changed}
+    report = center.analyze()
+    findings = [getattr(item, "summary", str(item)) for item in getattr(report, "findings", ())]
+    summary = f"Performance analysis: {report.overall_score}/100 overall; bottleneck {report.bottleneck}."
+    return {"summary": summary, "overall_score": report.overall_score,
+            "gaming_score": report.gaming_score, "ai_score": report.ai_score,
+            "balanced_score": report.balanced_score, "bottleneck": report.bottleneck,
+            "findings": findings}
+
+
 def default_model_registry() -> ModelRegistry:
     registry = ModelRegistry.discover(DEFAULT_MODEL_ROOTS)
     if not registry.models:
@@ -227,7 +255,7 @@ class DefaultMediaSpecialist:
         return files
 
 
-def build_default_orchestrator() -> ChatMPDOrchestrator:
+def build_default_orchestrator(*, start_automation_scheduler: bool = True) -> ChatMPDOrchestrator:
     registry = default_model_registry()
     services = build_platform_services(model_registry=registry)
     manager = ModelRuntimeManager(
@@ -250,12 +278,16 @@ def build_default_orchestrator() -> ChatMPDOrchestrator:
     def system_handler(_text: str) -> dict[str, Any]:
         return system_snapshot_summary(SystemInspector().snapshot())
 
+    def performance_handler(text: str) -> dict[str, Any]:
+        return performance_command_summary(services.performance, text)
+
     orchestrator = ChatMPDOrchestrator(
         assistant=assistant,
         specialist_handlers={
             "eso": eso_handler,
             "vortex": vortex_handler,
             "system": system_handler,
+            "performance": performance_handler,
             "media": media,
         },
         platform_services=services,
@@ -271,5 +303,6 @@ def build_default_orchestrator() -> ChatMPDOrchestrator:
             services.activity.record("automation", "Automation run failed.", details={"error": message[:500]})
             return message
 
-    services.bind_automation_runner(automation_runner)
+    if start_automation_scheduler:
+        services.bind_automation_runner(automation_runner)
     return orchestrator

@@ -670,5 +670,31 @@ class CliTest(unittest.TestCase):
             self.assertIn("left + right", (project / "calculator.py").read_text())
 
 
+    def test_automations_once_runs_due_jobs_and_closes_orchestrator(self) -> None:
+        class Store:
+            def __init__(self): self.calls = 0
+            def run_due(self, now, runner):
+                self.calls += 1
+                self.result = runner("check system health")
+                return (object(),)
+        class Platform:
+            def __init__(self): self.automations = Store()
+        class Result:
+            message = "healthy"
+        class Orchestrator:
+            def __init__(self): self.platform_services = Platform(); self.closed = False
+            def command(self, text): self.command_text = text; return Result()
+            def close(self): self.closed = True
+        instance = Orchestrator()
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = main(["automations", "--once"], orchestrator_factory=lambda: instance)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(instance.platform_services.automations.calls, 1)
+        self.assertEqual(instance.command_text, "check system health")
+        self.assertTrue(instance.closed)
+        self.assertIn("1 due automation", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

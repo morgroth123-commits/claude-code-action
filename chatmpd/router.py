@@ -55,6 +55,13 @@ class RequestRouter:
             return RouteDecision("coding", True, "Project-aware coding tools are appropriate.")
 
         if any(token in lowered for token in (
+            "performance", "bottleneck", "optimize my pc", "optimize this computer",
+            "optimize this pc", "gaming mode", "ai mode", "performance mode",
+            "fps stutter", "frame stutter",
+        )):
+            return RouteDecision("performance", False, "Performance analysis or optimization is requested.")
+
+        if any(token in lowered for token in (
             "windows", "driver", "audio", "crackling", "process", "service",
             "startup", "install", "uninstall", "computer", "pc", "system",
             "disk space", "network", "bluetooth", "device manager",

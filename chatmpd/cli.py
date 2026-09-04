@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from .automation_engine import AutomationScheduler
 from .engine import AgentEngine
 from .model import ScriptedModel
 from .policy import PermissionPolicy
@@ -239,6 +241,37 @@ def _run_live_task(
     return 0 if result.status == "succeeded" else 1
 
 
+def _run_automation_daemon(
+    orchestrator_factory: Callable[[], Any], *, once: bool, poll_seconds: float
+) -> int:
+    orchestrator = orchestrator_factory()
+    services = getattr(orchestrator, "platform_services", None)
+    if services is None or not hasattr(services, "automations"):
+        orchestrator.close()
+        raise RuntimeError("Automation services are unavailable.")
+    def runner(command: str) -> str:
+        try:
+            return str(orchestrator.command(command).message)
+        except Exception as error:
+            return f"{type(error).__name__}: {error}"[:500]
+    scheduler = AutomationScheduler(services.automations, runner, poll_seconds=poll_seconds)
+    try:
+        if once:
+            runs = scheduler.run_once()
+            print(f"ChatMPD automations: {len(runs)} due automation(s) ran.")
+            return 0
+        print(f"ChatMPD automation daemon running; poll interval {poll_seconds:g}s. Ctrl+C to stop.")
+        scheduler.start()
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        print("ChatMPD automation daemon stopped.")
+        return 0
+    finally:
+        scheduler.stop()
+        orchestrator.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ChatMPD", description="Local-first autonomous coding agent"
@@ -250,6 +283,9 @@ def build_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", help="Run a task with the local model")
     run.add_argument("--workspace", type=Path, required=True)
     run.add_argument("--task", required=True)
+    automations = subparsers.add_parser("automations", help="Run the local automation daemon")
+    automations.add_argument("--once", action="store_true", help="Run due automations once and exit")
+    automations.add_argument("--poll-seconds", type=float, default=15.0)
     return parser
 
 
@@ -261,6 +297,7 @@ def main(
     preflight_runner: Callable[..., Any] | None = None,
     task_runner: Callable[..., TaskOutcome] | None = None,
     demo_command_runner: Any | None = None,
+    orchestrator_factory: Callable[[], Any] | None = None,
 ) -> int:
     arguments = list(argv) if argv is not None else sys.argv[1:]
     if not arguments:
@@ -277,6 +314,15 @@ def main(
             runtime_factory or LlamaCppRuntime,
             sandbox_factory or SandboxRunner,
         )
+    if parsed.command == "automations":
+        if not 1.0 <= float(parsed.poll_seconds) <= 3600.0:
+            print("Automation poll interval must be between 1 and 3600 seconds.", file=sys.stderr)
+            return 2
+        factory = orchestrator_factory
+        if factory is None:
+            from .defaults import build_default_orchestrator
+            factory = lambda: build_default_orchestrator(start_automation_scheduler=False)
+        return _run_automation_daemon(factory, once=bool(parsed.once), poll_seconds=float(parsed.poll_seconds))
     if parsed.command == "run":
         selected_preflight = preflight_runner
         if selected_preflight is None and task_runner is None:

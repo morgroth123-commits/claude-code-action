@@ -32,6 +32,14 @@ class RequestRouterTest(unittest.TestCase):
         self.assertEqual(decision.capability, "coding")
         self.assertTrue(decision.requires_workspace)
 
+    def test_routes_performance_analysis_and_optimization_before_generic_system(self) -> None:
+        for prompt in (
+            "Analyze my PC performance and find the bottleneck",
+            "Optimize this computer for gaming performance",
+            "Switch ChatMPD to AI performance mode",
+        ):
+            self.assertEqual(self.router.classify(prompt).capability, "performance")
+
     def test_routes_host_work_and_falls_back_to_chat(self) -> None:
         system = self.router.classify("Diagnose why Windows audio is crackling")
         chat = self.router.classify("Explain photosynthesis simply")
