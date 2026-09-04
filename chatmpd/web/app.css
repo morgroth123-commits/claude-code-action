@@ -38,6 +38,7 @@ html[data-theme="dark"] {
 }
 html[data-theme="light"] { color-scheme: light; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { width: 100%; height: 100%; }
 body { margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
 button, input, textarea { font: inherit; color: inherit; }

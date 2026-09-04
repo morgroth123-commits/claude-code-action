@@ -29,6 +29,7 @@ class WebAssetTest(unittest.TestCase):
         self.assertIn("@media (max-width: 820px)", css)
         self.assertIn("--accent", css)
         self.assertIn(".composer-shell", css)
+        self.assertRegex(css, r"\[hidden\]\s*\{[^}]*display\s*:\s*none\s*!important")
 
     def test_javascript_uses_safe_dom_rendering_and_expected_interactions(self) -> None:
         script = (WEB / "app.js").read_text(encoding="utf-8")
