@@ -53,10 +53,12 @@ class ChatMPDOrchestrator:
         assistant: DesktopAssistant,
         router: RequestRouter | None = None,
         specialist_handlers: Mapping[str, SpecialistHandler] | None = None,
+        platform_services: Any | None = None,
     ) -> None:
         self.assistant = assistant
         self.router = router or RequestRouter()
         self.specialist_handlers = dict(specialist_handlers or {})
+        self.platform_services = platform_services
         self._closed = False
         self._lock = RLock()
 
@@ -69,6 +71,10 @@ class ChatMPDOrchestrator:
     ) -> CommandResult:
         if self._closed:
             raise RuntimeError("ChatMPD is closed.")
+        if self.platform_services is not None:
+            capture = getattr(self.platform_services, "capture_explicit_memory", None)
+            if callable(capture):
+                capture(text)
         decision = self.router.classify(text)
         if decision.capability == "chat":
             turn = self.assistant.chat(text)
@@ -106,6 +112,9 @@ class ChatMPDOrchestrator:
                 return
             self._closed = True
             self.assistant.close()
+            closer = getattr(self.platform_services, "close", None)
+            if callable(closer):
+                closer()
 
     @staticmethod
     def _normalize(capability: str, value: Any) -> CommandResult:

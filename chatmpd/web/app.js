@@ -484,8 +484,328 @@ async function refreshMobileStatus() {
   }
 }
 
+const CONTROL_TITLES = {
+  overview: ["Overview", "Local ChatMPD platform"],
+  memory: ["Memory", "Durable facts and preferences"],
+  knowledge: ["Knowledge", "Local documents and retrieval"],
+  capabilities: ["Skills & Tools", "Built-ins, extensions, packs, and mod sources"],
+  models: ["Models", "Local models, LM Studio, and Bionic"],
+  workflows: ["Workflows", "Reusable local commands"],
+  automations: ["Automations", "Recurring and conditional local tasks"],
+  recovery: ["Recovery", "Reversible snapshots and rollback"],
+  prompts: ["Prompt Guide", "Goal → Context → Constraints → Result → Verification"],
+  diagnostics: ["Diagnostics", "Health checks and safe self-repair"],
+  sharing: ["Sharing", "Sanitized generic ChatMPD packages"],
+};
+
+function controlNode(tag, text = "", className = "") {
+  const node = document.createElement(tag);
+  if (text) node.textContent = String(text);
+  if (className) node.className = className;
+  return node;
+}
+
+function controlCard(title, detail = "") {
+  const card = controlNode("section", "", "control-item");
+  card.append(controlNode("strong", title));
+  if (detail) card.append(controlNode("p", detail));
+  return card;
+}
+function controlInput(placeholder, value = "") {
+  const input = document.createElement("input");
+  input.placeholder = placeholder;
+  input.value = value;
+  input.autocomplete = "off";
+  return input;
+}
+
+function controlAction(label, handler, className = "") {
+  const button = controlNode("button", label, className);
+  button.type = "button";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try { await handler(); }
+    catch (error) { showControlError(error); }
+    finally { button.disabled = false; }
+  });
+  return button;
+}
+
+function showControlError(error) {
+  const content = $("control-content");
+  const box = controlNode("div", `Error: ${error.message || error}`, "control-error");
+  content.prepend(box);
+}
+
+function renderControlCards(cards) {
+  const content = $("control-content");
+  content.replaceChildren(...cards);
+}
+async function renderOverviewSection() {
+  const summary = await api("/api/platform/summary");
+  const cards = [];
+  cards.push(controlCard("Local-first", "Unlimited local use; no ChatMPD token billing or mandatory paid API."));
+  cards.push(controlCard("Hardware", `${summary.hardware?.gpu_name || "GPU unknown"} · ${summary.hardware?.memory_total_gib || "?"} GiB RAM · ${summary.recommended_model_tier || "auto"} tier`));
+  cards.push(controlCard("Memory", `${summary.memory_count || 0} durable memories · ${summary.knowledge_count || 0} knowledge sources`));
+  cards.push(controlCard("Extensions", `${summary.capability_count || 0} registered capabilities · ${summary.extension_count || 0} extensions`));
+  const local = summary.lm_studio || {};
+  cards.push(controlCard("LM Studio / Bionic", `${local.available ? "LM Studio runtime available" : "LM Studio runtime not found"} · Bionic ${summary.bionic?.installed ? "installed" : "not installed"}`));
+  const media = controlCard("Local media & voice", `Voice transcription: ${summary.voice?.ready ? "ready" : "optional local model missing"} · Vision: ${summary.vision?.ready ? "ready" : "optional local model missing"}`);
+  cards.push(media);
+  renderControlCards(cards);
+}
+
+async function renderMemorySection() {
+  const items = await api("/api/platform/memory");
+  const cards = [];
+  const add = controlCard("Add memory", "Store a durable fact or preference. Chats themselves already persist separately.");
+  const input = controlInput("What should ChatMPD remember?");
+  add.append(input, controlAction("Remember", async () => {
+    if (!input.value.trim()) return;
+    await api("/api/platform/memory", { method: "POST", body: JSON.stringify({ content: input.value.trim(), kind: "fact", source: "control-center" }) });
+    await loadControlSection("memory");
+  }, "primary-button"));
+  cards.push(add);
+  for (const item of items) {
+    const card = controlCard(item.kind || "Memory", item.content || "");
+    const meta = controlNode("small", `${item.pinned ? "Pinned · " : ""}${item.source || "local"}`);
+    card.append(meta, controlAction("Delete", async () => {
+      if (!window.confirm("Delete this durable memory?")) return;
+      await api(`/api/platform/memory/${encodeURIComponent(item.memory_id)}`, { method: "DELETE" });
+      await loadControlSection("memory");
+    }, "danger-text"));
+    cards.push(card);
+  }
+  renderControlCards(cards);
+}
+
+async function renderKnowledgeSection() {
+  const items = await api("/api/platform/knowledge");
+  const cards = [];
+  const add = controlCard("Add local knowledge", "Index a local text, PDF, DOCX, CSV, JSON, code, or spreadsheet file for retrieval.");
+  const input = controlInput("Full path to a local file");
+  add.append(input, controlAction("Index file", async () => {
+    if (!input.value.trim()) return;
+    await api("/api/platform/knowledge", { method: "POST", body: JSON.stringify({ path: input.value.trim() }) });
+    await loadControlSection("knowledge");
+  }, "primary-button"));
+  cards.push(add);
+  for (const item of items) {
+    cards.push(controlCard(item.title || "Knowledge source", `${item.path || ""}\nSHA-256: ${item.sha256 || ""}`));
+  }
+  renderControlCards(cards);
+}
+async function renderCapabilitiesSection() {
+  const [items, packs, extensions, sources] = await Promise.all([
+    api("/api/platform/capabilities"), api("/api/platform/packs"),
+    api("/api/platform/extensions"), api("/api/platform/mod-sources"),
+  ]);
+  const cards = [];
+  const sourceCard = controlCard("Mod repositories", `ESOUI: ${sources.esoui?.catalog || "not configured"}\nNexus Mods: ${sources.nexus?.site || "not configured"}`);
+  sourceCard.append(controlNode("small", sources.nexus?.api_key_configured ? "Nexus API key configured" : "Nexus API key optional and not configured"));
+  cards.push(sourceCard);
+  for (const pack of packs) {
+    const card = controlCard(pack.name, pack.description || pack.pack_id);
+    card.append(controlAction(pack.installed ? "Uninstall pack" : "Install pack", async () => {
+      const action = pack.installed ? "uninstall" : "install";
+      await api(`/api/platform/packs/${encodeURIComponent(pack.pack_id)}/${action}`, { method: "POST", body: "{}" });
+      await loadControlSection("capabilities");
+    }));
+    cards.push(card);
+  }
+  for (const item of items) cards.push(controlCard(item.title || item.capability_id, `${item.kind} · ${item.health} · risk ${item.risk}`));
+  for (const item of extensions) {
+    if (!items.some((existing) => existing.capability_id === item.capability_id)) {
+      cards.push(controlCard(item.title || item.capability_id, `Extension · ${item.health}`));
+    }
+  }
+  renderControlCards(cards);
+}
+
+async function renderModelsSection() {
+  const [modelData, lm, bionic] = await Promise.all([
+    api("/api/platform/models"), api("/api/platform/lmstudio"), api("/api/platform/bionic"),
+  ]);
+  const cards = [];
+  const local = controlCard("LM Studio", lm.available ? `${lm.source || "local"} · ${lm.executable || "runtime detected"}` : "Not detected as a standalone runtime.");
+  cards.push(local);
+  const bionicCard = controlCard("Bionic", bionic.installed ? `Installed: ${bionic.executable}` : "Not installed");
+  if (bionic.installed) bionicCard.append(controlAction("Open Bionic", async () => {
+    await api("/api/platform/bionic/open", { method: "POST", body: "{}" });
+  }));
+  cards.push(bionicCard);
+  for (const model of modelData.models || []) {
+    cards.push(controlCard(model.name, `${model.family || "local"} · ${(model.roles || []).join(", ")} · ${model.parameter_billions || "?"}B`));
+  }
+  for (const bench of modelData.benchmarks || []) {
+    cards.push(controlCard(`Benchmark: ${String(bench.model_path || "").split(/[\\/]/).pop()}`, `${bench.role} · ${bench.tokens_per_second} tok/s · quality ${bench.quality_score}`));
+  }
+  renderControlCards(cards);
+}
+
+async function renderWorkflowsSection() {
+  const items = await api("/api/platform/workflows");
+  const cards = [];
+  const create = controlCard("Save workflow", "Reuse a successful natural-language command.");
+  const name = controlInput("Workflow name");
+  const command = controlInput("Command to run");
+  create.append(name, command, controlAction("Save workflow", async () => {
+    await api("/api/platform/workflows", { method: "POST", body: JSON.stringify({ name: name.value, command: command.value, workspace: state.workspace || null }) });
+    await loadControlSection("workflows");
+  }, "primary-button"));
+  cards.push(create);
+  for (const item of items) {
+    const card = controlCard(item.name, item.command);
+    card.append(controlAction("Run", async () => {
+      const result = await api(`/api/platform/workflows/${encodeURIComponent(item.workflow_id)}/run`, { method: "POST", body: "{}" });
+      $("control-dialog").close();
+      appendMessage("assistant", result.message || "Workflow completed.");
+      renderResult(result);
+    }, "primary-button"));
+    cards.push(card);
+  }
+  renderControlCards(cards);
+}
+async function renderAutomationsSection() {
+  const items = await api("/api/platform/automations");
+  const cards = [];
+  const create = controlCard("Create automation", "Minimum interval is 60 seconds. Runs stay local.");
+  const name = controlInput("Automation name");
+  const command = controlInput("Command");
+  const interval = controlInput("Interval seconds", "3600");
+  const condition = controlInput("Optional result text condition");
+  create.append(name, command, interval, condition, controlAction("Create", async () => {
+    await api("/api/platform/automations", { method: "POST", body: JSON.stringify({
+      name: name.value, command: command.value,
+      interval_seconds: Number(interval.value || 3600),
+      condition_contains: condition.value.trim() || null,
+    }) });
+    await loadControlSection("automations");
+  }, "primary-button"));
+  cards.push(create);
+  for (const item of items) {
+    const card = controlCard(item.name, `${item.command} · next ${item.next_run}`);
+    card.append(controlAction(item.enabled ? "Disable" : "Enable", async () => {
+      await api(`/api/platform/automations/${encodeURIComponent(item.automation_id)}/enabled`, { method: "POST", body: JSON.stringify({ enabled: !item.enabled }) });
+      await loadControlSection("automations");
+    }));
+    card.append(controlAction("Delete", async () => {
+      if (!window.confirm("Delete this automation?")) return;
+      await api(`/api/platform/automations/${encodeURIComponent(item.automation_id)}`, { method: "DELETE" });
+      await loadControlSection("automations");
+    }, "danger-text"));
+    cards.push(card);
+  }
+  renderControlCards(cards);
+}
+async function renderRecoverySection() {
+  const items = await api("/api/platform/recovery");
+  const cards = [controlCard("Recovery policy", "ChatMPD snapshots reversible files before managed changes. Rollback always requires explicit confirmation.")];
+  for (const item of items) {
+    const card = controlCard(item.label, `${item.created_at} · ${(item.entries || []).length} file(s)`);
+    card.append(controlAction("Rollback", async () => {
+      if (!window.confirm(`Restore snapshot '${item.label}'? Current target files will be replaced.`)) return;
+      const result = await api(`/api/platform/recovery/${encodeURIComponent(item.snapshot_id)}/rollback`, { method: "POST", body: JSON.stringify({ confirmed: true }) });
+      card.append(controlNode("small", `Restored ${(result.restored || []).length} file(s).`));
+    }, "danger-text"));
+    cards.push(card);
+  }
+  renderControlCards(cards);
+}
+
+async function renderPromptsSection() {
+  const data = await api("/api/platform/prompts");
+  const cards = [];
+  const optimizer = controlCard("Improve a prompt", "You can still speak normally; this is optional for complex work.");
+  const goal = controlInput("Goal");
+  const context = controlInput("Context (optional)");
+  const constraints = controlInput("Constraints, separated by ;");
+  optimizer.append(goal, context, constraints, controlAction("Build optimized prompt", async () => {
+    const result = await api("/api/platform/prompts", { method: "POST", body: JSON.stringify({
+      goal: goal.value, context: context.value,
+      constraints: constraints.value.split(";").map((x) => x.trim()).filter(Boolean),
+    }) });
+    const output = controlNode("pre", result.prompt || "", "control-prompt-output");
+    optimizer.append(output, controlAction("Copy prompt", () => copyText(result.prompt || "")));
+  }, "primary-button"));
+  cards.push(optimizer);
+  for (const [name, template] of Object.entries(data.templates || {})) {
+    const card = controlCard(name, template);
+    card.append(controlAction("Copy template", () => copyText(template)));
+    cards.push(card);
+  }
+  renderControlCards(cards);
+}
+async function renderDiagnosticsSection() {
+  const [doctor, voice, vision, activity] = await Promise.all([
+    api("/api/platform/doctor"), api("/api/platform/voice"),
+    api("/api/platform/vision"), api("/api/platform/activity"),
+  ]);
+  const cards = [];
+  const head = controlCard("Platform Doctor", doctor.ready ? "All required platform checks are ready." : "One or more required checks need attention.");
+  head.append(controlAction("Run safe repair", async () => {
+    const result = await api("/api/platform/doctor/repair", { method: "POST", body: "{}" });
+    head.append(controlNode("small", (result.actions || []).join(" · ") || "No repair was needed."));
+  }, "primary-button"));
+  cards.push(head);
+  for (const check of doctor.checks || []) cards.push(controlCard(check.name, `${check.ready ? "Ready" : check.optional ? "Optional" : "Needs attention"} · ${check.detail}`));
+  cards.push(controlCard("Voice", `TTS ${voice.tts || "unknown"} · transcription ${voice.transcription?.ready ? "ready" : "optional local Whisper not configured"}`));
+  cards.push(controlCard("Vision", `${vision.mode || "local-only"} · ${vision.ready ? "ready" : "optional local vision model not configured"}`));
+  for (const event of (activity || []).slice(0, 12)) cards.push(controlCard(`Activity · ${event.kind}`, `${event.summary} · ${event.created_at}`));
+  renderControlCards(cards);
+}
+
+async function renderSharingSection() {
+  const cards = [];
+  const policy = controlCard("Generic shareable ChatMPD", "Exports use explicit include paths and exclude chats, durable memories, credentials, tokens, recovery data, machine secrets, and explicit-sex extensions.");
+  const include = controlInput("Extension/skill folder or file to include");
+  const destination = controlInput("Destination .chatmpdpack path");
+  policy.append(include, destination, controlAction("Create sanitized pack", async () => {
+    const result = await api("/api/platform/export", { method: "POST", body: JSON.stringify({
+      include_paths: [include.value.trim()].filter(Boolean), destination: destination.value.trim() || undefined,
+    }) });
+    policy.append(controlNode("small", `Created: ${result.path}`), controlAction("Copy path", () => copyText(result.path)));
+  }, "primary-button"));
+  cards.push(policy);
+  cards.push(controlCard("Unlimited local use", "No ChatMPD subscription, per-token billing, artificial quota, or mandatory paid API. Optional external services remain separately controlled by their providers."));
+  renderControlCards(cards);
+}
+async function loadControlSection(section = "overview") {
+  const key = CONTROL_TITLES[section] ? section : "overview";
+  const [title, subtitle] = CONTROL_TITLES[key];
+  $("control-section-title").textContent = title;
+  $("control-section-subtitle").textContent = subtitle;
+  $("control-content").replaceChildren(controlNode("p", "Loading local platform data…", "control-loading"));
+  document.querySelectorAll("[data-control-section]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.controlSection === key);
+  });
+  try {
+    const renderers = {
+      overview: renderOverviewSection, memory: renderMemorySection,
+      knowledge: renderKnowledgeSection, capabilities: renderCapabilitiesSection,
+      models: renderModelsSection, workflows: renderWorkflowsSection,
+      automations: renderAutomationsSection, recovery: renderRecoverySection,
+      prompts: renderPromptsSection, diagnostics: renderDiagnosticsSection,
+      sharing: renderSharingSection,
+    };
+    await renderers[key]();
+  } catch (error) {
+    $("control-content").replaceChildren(controlNode("div", `Unable to load ${title}: ${error.message}`, "control-error"));
+  }
+}
+
+async function openControlCenter(section = "overview") {
+  const dialog = $("control-dialog");
+  if (!dialog.open) dialog.showModal();
+  await loadControlSection(section);
+}
+
+
 function bindEvents() {
   $("pair-device-button").addEventListener("click", pairDevice);
+  $("control-center").addEventListener("click", () => openControlCenter("overview"));
+  $("control-refresh").addEventListener("click", () => loadControlSection($("control-section-title").textContent.toLowerCase().replace("skills & tools", "capabilities").replace("prompt guide", "prompts")));
+  document.querySelectorAll("[data-control-section]").forEach((button) => button.addEventListener("click", () => loadControlSection(button.dataset.controlSection)));
   $("new-chat").addEventListener("click", createConversation);
   $("composer").addEventListener("submit", submitPrompt);
   $("stop").addEventListener("click", cancelActiveJob);

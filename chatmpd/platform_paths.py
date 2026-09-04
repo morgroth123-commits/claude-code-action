@@ -28,3 +28,19 @@ class PlatformPaths:
     @property
     def data(self) -> Path:
         return self.root / "platform"
+
+    @property
+    def attachments(self) -> Path:
+        return self.data / "attachments"
+
+    @property
+    def artifacts(self) -> Path:
+        return self.data / "artifacts"
+
+    @property
+    def exports(self) -> Path:
+        return self.root / "exports"
+
+    @property
+    def recovery(self) -> Path:
+        return self.data / "recovery"

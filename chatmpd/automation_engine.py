@@ -150,3 +150,51 @@ class AutomationStore:
             condition_contains=data.get("condition_contains"),
             enabled=bool(data.get("enabled", True)),
         )
+
+
+from threading import Event, Thread
+
+
+class AutomationScheduler:
+    """Small local scheduler that executes due automations through an injected runner."""
+
+    def __init__(
+        self,
+        store: AutomationStore,
+        runner: Callable[[str], Any],
+        *,
+        poll_seconds: float = 15.0,
+    ) -> None:
+        if not 1.0 <= float(poll_seconds) <= 3600.0:
+            raise ValueError("poll_seconds must be between 1 and 3600")
+        self.store = store
+        self.runner = runner
+        self.poll_seconds = float(poll_seconds)
+        self._stop = Event()
+        self._thread: Thread | None = None
+
+    def run_once(self, now: datetime | None = None) -> tuple[Any, ...]:
+        current = now or datetime.now(UTC)
+        return tuple(self.store.run_due(current, self.runner))
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = Thread(target=self._loop, name="ChatMPD automation scheduler", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        thread = self._thread
+        self._thread = None
+        self._stop.set()
+        if thread is not None:
+            thread.join(timeout=max(2.0, self.poll_seconds + 1.0))
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.run_once()
+            except Exception:
+                # A failed automation is isolated from the scheduler thread.
+                pass
+            self._stop.wait(self.poll_seconds)

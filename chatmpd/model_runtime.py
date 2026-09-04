@@ -19,9 +19,11 @@ class ModelRuntimeManager:
         registry: ModelRegistry,
         *,
         runtime_factory: RuntimeFactory,
+        selector: Callable[[ModelRole], LocalModel | None] | None = None,
     ) -> None:
         self.registry = registry
         self._runtime_factory = runtime_factory
+        self._selector = selector
         self._active_model: LocalModel | None = None
         self._active_runtime: Any | None = None
 
@@ -62,6 +64,9 @@ class ModelRuntimeManager:
             runtime.stop()
 
     def _select(self, role: ModelRole) -> LocalModel:
+        model = self._selector(role) if self._selector is not None else None
+        if model is not None:
+            return model
         model = self.registry.best(role)
         if model is not None:
             return model

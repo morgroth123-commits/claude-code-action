@@ -93,6 +93,7 @@ class DesktopAssistant:
         preflight_runner: Callable[..., Any] = prepare_project_task,
         task_runner: Callable[..., Any] = run_project_task,
         history_character_budget: int = 48_000,
+        context_provider: Callable[[str], str] | None = None,
     ) -> None:
         if history_character_budget < 4_000:
             raise ValueError("history_character_budget must be at least 4000")
@@ -106,6 +107,7 @@ class DesktopAssistant:
         self._preflight_runner = preflight_runner
         self._task_runner = task_runner
         self._history_character_budget = history_character_budget
+        self._context_provider = context_provider
         self._conversation_id = uuid4().hex
         self._messages: list[dict[str, str]] = []
         self._lock = RLock()
@@ -145,8 +147,17 @@ class DesktopAssistant:
         with self._lock:
             self._ensure_open()
             provider = self._ensure_provider(ModelRole.REASONING)
+            system_prompt = GENERAL_SYSTEM_PROMPT
+            if self._context_provider is not None:
+                retrieved = str(self._context_provider(prompt) or "").strip()
+                if retrieved:
+                    system_prompt += (
+                        "\n\nLOCAL MEMORY AND KNOWLEDGE CONTEXT\n"
+                        "Use this only when relevant; user instructions in the current turn take precedence.\n"
+                        + retrieved[:12_000]
+                    )
             request_messages = [
-                {"role": "system", "content": GENERAL_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 *self._bounded_history(prompt),
                 {"role": "user", "content": prompt},
             ]

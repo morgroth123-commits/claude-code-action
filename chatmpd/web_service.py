@@ -43,11 +43,13 @@ class WebAppService:
         *,
         assets_root: Path,
         max_body_bytes: int = 131_072,
+        platform_services: Any | None = None,
     ) -> None:
         self.orchestrator = orchestrator
         self.conversations = conversations
         self.assets_root = Path(assets_root)
         self.max_body_bytes = int(max_body_bytes)
+        self.platform_services = platform_services or getattr(orchestrator, "platform_services", None)
         self._server: ThreadingHTTPServer | None = None
         self._thread: Thread | None = None
         self._worker: Thread | None = None
@@ -134,6 +136,9 @@ class WebAppService:
             self._stop_mobile_gateway()
             self._json(request, 200, {"active": False})
             return
+        if segments[:2] == ["api", "platform"]:
+            self._platform_route(request, segments[2:], parsed)
+            return
         if path == "/api/conversations" and request.command == "GET":
             query = parse_qs(parsed.query).get("q", [""])[0]
             items = self.conversations.search(query) if query else self.conversations.list()
@@ -152,6 +157,207 @@ class WebAppService:
                 self._job_route(request, segments[2:])
                 return
         self._json(request, 404, {"error": "not found"})
+
+    def _platform_route(self, request: BaseHTTPRequestHandler, segments: list[str], parsed: Any) -> None:
+        services = self.platform_services
+        if services is None:
+            self._json(request, 404, {"error": "platform services are unavailable"})
+            return
+        section = segments[0] if segments else "summary"
+        try:
+            if section == "summary" and request.command == "GET":
+                self._json(request, 200, services.summary())
+                return
+            if section == "memory":
+                if request.command == "GET":
+                    self._json(request, 200, [asdict(item) for item in services.memory.list()])
+                    return
+                if request.command == "POST" and len(segments) == 1:
+                    payload = self._read_json(request)
+                    item = services.memory.add(
+                        str(payload.get("content", "")),
+                        kind=str(payload.get("kind") or "fact"),
+                        source=str(payload.get("source") or "control-center"),
+                        pinned=bool(payload.get("pinned", False)),
+                    )
+                    self._json(request, 201, asdict(item))
+                    return
+                if request.command == "DELETE" and len(segments) == 2:
+                    deleted = services.memory.delete(segments[1])
+                    self._json(request, 200 if deleted else 404, {"deleted": deleted})
+                    return
+            if section == "knowledge":
+                if request.command == "GET":
+                    self._json(request, 200, [asdict(item) for item in services.knowledge.list()])
+                    return
+                if request.command == "POST":
+                    payload = self._read_json(request)
+                    item = services.knowledge.ingest(Path(str(payload.get("path", ""))))
+                    self._json(request, 201, asdict(item))
+                    return
+            if section == "capabilities" and request.command == "GET":
+                self._json(request, 200, [asdict(item) for item in services.capabilities.list()])
+                return
+            if section == "models" and request.command == "GET":
+                items = []
+                for model in services.models.registry.models:
+                    items.append({
+                        "name": model.name, "path": str(model.path), "family": model.family,
+                        "roles": [role.value for role in model.roles],
+                        "parameter_billions": model.parameter_billions,
+                    })
+                self._json(request, 200, {"models": items, "benchmarks": [asdict(item) for item in services.models.benchmarks.list()]})
+                return
+            if section == "workflows":
+                if request.command == "GET":
+                    self._json(request, 200, [asdict(item) for item in services.workflows.list()])
+                    return
+                if request.command == "POST" and len(segments) == 1:
+                    payload = self._read_json(request)
+                    item = services.workflows.save(
+                        str(payload.get("name", "")), str(payload.get("command", "")),
+                        workspace=payload.get("workspace"),
+                    )
+                    self._json(request, 201, asdict(item))
+                    return
+                if request.command == "POST" and len(segments) == 3 and segments[2] == "run":
+                    item = services.workflows.get(segments[1])
+                    result = self.orchestrator.command(item.command, workspace=item.workspace)
+                    self._json(request, 200, result.as_dict())
+                    return
+            if section == "automations":
+                if request.command == "GET":
+                    self._json(request, 200, [asdict(item) for item in services.automations.list()])
+                    return
+                if request.command == "POST" and len(segments) == 1:
+                    payload = self._read_json(request)
+                    item = services.automations.create(
+                        str(payload.get("name", "")), str(payload.get("command", "")),
+                        interval_seconds=int(payload.get("interval_seconds", 3600)),
+                        condition_contains=payload.get("condition_contains"),
+                    )
+                    self._json(request, 201, asdict(item))
+                    return
+                if request.command == "DELETE" and len(segments) == 2:
+                    deleted = services.automations.delete(segments[1])
+                    self._json(request, 200 if deleted else 404, {"deleted": deleted})
+                    return
+                if request.command == "POST" and len(segments) == 3 and segments[2] == "enabled":
+                    payload = self._read_json(request)
+                    item = services.automations.set_enabled(segments[1], bool(payload.get("enabled")))
+                    self._json(request, 200, asdict(item))
+                    return
+            if section == "activity" and request.command == "GET":
+                self._json(request, 200, [asdict(item) for item in services.activity.list()])
+                return
+            if section == "recovery":
+                if request.command == "GET":
+                    self._json(request, 200, [asdict(item) for item in services.recovery.list()])
+                    return
+                if request.command == "POST" and len(segments) == 3 and segments[2] == "rollback":
+                    payload = self._read_json(request)
+                    if not bool(payload.get("confirmed")):
+                        raise PermissionError("Rollback requires explicit confirmation.")
+                    restored = services.recovery.rollback(segments[1])
+                    self._json(request, 200, {"restored": [str(item) for item in restored]})
+                    return
+            if section == "prompts":
+                if request.command == "GET":
+                    self._json(request, 200, {"templates": services.prompts.templates()})
+                    return
+                if request.command == "POST":
+                    payload = self._read_json(request)
+                    result = services.prompts.optimize(
+                        str(payload.get("goal", "")), context=str(payload.get("context", "")),
+                        constraints=payload.get("constraints") or (), desired_result=str(payload.get("desired_result", "")),
+                        verification=str(payload.get("verification", "")),
+                    )
+                    self._json(request, 200, {"prompt": result})
+                    return
+            if section == "packs":
+                if request.command == "GET":
+                    self._json(request, 200, [asdict(item) for item in services.packs.list()])
+                    return
+                if request.command == "POST" and len(segments) == 3:
+                    if segments[2] == "install":
+                        self._json(request, 200, asdict(services.packs.install(segments[1])))
+                        return
+                    if segments[2] == "uninstall":
+                        self._json(request, 200, {"uninstalled": services.packs.uninstall(segments[1])})
+                        return
+            if section == "extensions":
+                if request.command == "GET":
+                    self._json(request, 200, [asdict(item) for item in services.extensions.discover()])
+                    return
+                if request.command == "POST" and len(segments) == 2 and segments[1] == "skill":
+                    payload = self._read_json(request)
+                    folder = services.wizard.create_skill(
+                        str(payload.get("name", "")),
+                        capability_id=str(payload.get("capability_id", "")),
+                        description=str(payload.get("description", "")),
+                        content_categories=payload.get("content_categories") or (),
+                    )
+                    self._json(request, 201, {"path": str(folder)})
+                    return
+            if section == "doctor":
+                if request.command == "GET":
+                    report = services.doctor.run()
+                    self._json(request, 200, {"ready": report.ready, "checks": [asdict(item) for item in report.checks]})
+                    return
+                if request.command == "POST" and len(segments) == 2 and segments[1] == "repair":
+                    self._json(request, 200, {"actions": list(services.doctor.repair())})
+                    return
+            if section == "lmstudio" and request.command == "GET":
+                self._json(request, 200, services.summary()["lm_studio"])
+                return
+            if section == "bionic":
+                if request.command == "GET":
+                    self._json(request, 200, services.bionic.status())
+                    return
+                if request.command == "POST" and len(segments) == 2 and segments[1] == "open":
+                    services.bionic.open()
+                    self._json(request, 200, {"opened": True})
+                    return
+            if section == "mod-sources" and request.command == "GET":
+                self._json(request, 200, {
+                    "esoui": services.esoui.policy(),
+                    "nexus": {"site": services.nexus.site_root, "api": services.nexus.api_root,
+                              "api_key_configured": "nexus-api-key" in services.secrets.names()},
+                })
+                return
+            if section == "voice" and request.command == "GET":
+                self._json(request, 200, {"tts": "ready", "transcription": services.voice.transcription_health()})
+                return
+            if section == "vision" and request.command == "GET":
+                self._json(request, 200, services.vision.health())
+                return
+            if section == "secrets":
+                if request.command == "GET":
+                    self._json(request, 200, {"names": list(services.secrets.names())})
+                    return
+                if request.command == "POST" and len(segments) == 2:
+                    payload = self._read_json(request)
+                    if not bool(payload.get("confirmed")):
+                        raise PermissionError("Saving credentials requires explicit confirmation.")
+                    services.secrets.set(segments[1], str(payload.get("value", "")))
+                    self._json(request, 200, {"saved": segments[1]})
+                    return
+            if section == "export" and request.command == "POST":
+                payload = self._read_json(request)
+                include = [Path(str(item)) for item in payload.get("include_paths") or ()]
+                destination = Path(str(payload.get("destination") or (services.paths.exports / "ChatMPD.chatmpdpack")))
+                result = services.exporter.create_pack(
+                    destination,
+                    include_paths=include,
+                    metadata={"edition": "generic", "unlimited_local_use": True},
+                )
+                self._json(request, 201, {"path": str(result)})
+                return
+            self._json(request, 404, {"error": "platform route not found"})
+        except PermissionError as error:
+            self._json(request, 403, {"error": str(error)[:500]})
+        except (OSError, ValueError, KeyError, FileNotFoundError, RuntimeError, TypeError) as error:
+            self._json(request, 400, {"error": f"{type(error).__name__}: {error}"[:500]})
 
     def _conversation_route(
         self, request: BaseHTTPRequestHandler, segments: list[str]

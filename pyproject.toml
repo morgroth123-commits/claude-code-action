@@ -4,15 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ChatMPD"
-version = "0.2.0"
-description = "A local-first autonomous assistant with model routing, verified coding, game specialists, media, and mobile access"
+version = "0.3.0"
+description = "A local-first autonomous assistant with persistent memory, extensible skills and tools, verified coding, media, game specialists, and mobile access"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-dependencies = [
-    "pywebview>=6.2,<7",
-    "qrcode>=8,<9",
-]
+dependencies = []
 classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: MIT License",
@@ -25,6 +22,8 @@ classifiers = [
 chatmpd = "chatmpd.app:main"
 
 [project.optional-dependencies]
+desktop = ["pywebview>=6.2,<7", "qrcode>=8,<9"]
+documents = ["pypdf>=6,<7", "openpyxl>=3.1,<4"]
 build = ["pyinstaller>=6,<7"]
 
 [tool.setuptools.packages.find]

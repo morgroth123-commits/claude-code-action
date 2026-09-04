@@ -1,93 +1,82 @@
 # Most Effective Use of ChatMPD
 
-ChatMPD works best when you give its local model one small, verifiable result at a time. It is a private task-execution tool for supported Python projects, not a cloud chat service.
+ChatMPD is a local-first general assistant, not a coding-only task runner. The normal interface is the modern `ChatMPD.exe` conversation window. Ask in ordinary language; the router chooses reasoning, verified coding, system/ESO/Vortex specialists, media, skills, plugins, or external tools underneath one conversation.
 
-## Five-minute first task
+## Start here
 
-1. Back up the project or begin with a clean Git worktree.
-2. Open ChatMPD and choose the Python project's actual root folder.
-3. Describe one result, its constraints, and the evidence that would count as success.
-4. Press Ctrl+Enter once and leave the selected files alone while ChatMPD works.
-5. Review the summary, every changed file, every check, and the saved run record.
+1. Open ChatMPD from the desktop shortcut.
+2. Ask what you want in normal language.
+3. Choose a project folder only for coding/project work.
+4. Use the sidebar for persistent conversation history; **New chat does not delete old chats**.
+5. Open **Control Center** for Memory, Knowledge, Skills & Tools, Models, Workflows, Automations, Recovery, Prompt Guide, Diagnostics, and Sharing.
 
-## A request formula that works
+All default inference remains local. ChatMPD itself has no per-token charge, subscription, artificial daily quota, or mandatory paid API. Hardware/model context limits still exist, and long conversations use persisted history plus retrieval rather than product metering.
 
-Use: Result + context + constraints + success evidence.
+## Persistent memory and knowledge
 
-Strong example: "Fix the incorrect total in calculator.py. Keep the public function names and file format unchanged. Add or update standard-library unittest coverage, and finish only when the full unittest suite passes."
+Conversation transcripts persist locally until you explicitly delete them. Opening an old chat reloads that conversation into the model context.
 
-Weak example: "Make everything better."
+Durable memory is separate from chat history. Say `Remember that ...` for a fact or preference you want available across conversations. Review or delete durable memories in Control Center → Memory.
 
-The strong request tells the model where to look, what outcome matters, what it must preserve, and how the application can verify the work. If you know the relevant filename, failing behavior, required compatibility, or exact test, include it. Do not prescribe an implementation you do not actually require; describing the outcome leaves room for the local model to choose the smallest repair.
+Use Control Center → Knowledge to index local text, Markdown, code, CSV/JSON, PDF, DOCX, and XLSX files. Relevant memory and knowledge are retrieved into the model's system context for the current request without being duplicated into the visible transcript.
+## Skills, plugins, tools, and packs
 
-## Choose the right task size
+Control Center → Skills & Tools lists built-in capabilities, portable Markdown/TOML skills, bounded subprocess plugins, CLI adapters, HTTP adapters, and MCP stdio tools. Extensions declare their permissions/risk/health and remain separate from ChatMPD's core process by default.
 
-Describe one bug, one small feature, one focused refactor, or one explanation per run. Split broad work into ordered tasks because the local 7B model and 8,192-token context are intentionally bounded.
+Capability packs group related functions such as Developer, Research, Media, Modding, ESO, and Windows diagnostics. The extension wizard can create a new skill skeleton from a name, purpose, and capability id; the generated skill still inherits ChatMPD's permission and verification boundaries.
 
-Good first tasks include repairing one failing function, adding one validation rule, explaining one unfamiliar module, or updating one focused group of tests. Split a request such as "redesign the application, migrate the database, and deploy it" into independently testable results. Review the first result before asking for the next layer.
+For ESO, ChatMPD treats the public ESOUI catalog as the canonical discovery source and Minion's local state as installed-addon evidence. It does not impersonate Minion's private API. For Vortex/modding, Nexus Mods is the canonical repository source; public data works without an account while authenticated API features are optional.
 
-## Prepare the project
+## Models, LM Studio, and Bionic
 
-Use a backed-up local Python project, prefer a clean Git worktree, keep real secrets out of ordinary source text, and confirm WSL Ubuntu plus bubblewrap are ready with doctor when troubleshooting.
+ChatMPD discovers local GGUF models, records benchmark results, and can persist role overrides. Vader's proven llama.cpp role manager remains the primary runtime for reasoning/coding.
 
-Choose the directory that actually contains the Python source and, when present, the `tests` directory. ChatMPD refuses folders with no recognized Python files because it cannot select its fixed offline verification gate. A clean Git worktree makes the result easier to inspect, but ChatMPD does not commit, push, fetch, or open pull requests.
+LM Studio is supported as an additional local OpenAI-compatible backend/management surface. If a normal LM Studio installation is not present, ChatMPD can detect the LM Studio runtime bundled with Bionic. Bionic is exposed as an optional companion launcher; ChatMPD does not enable Bionic cloud/credit usage on your behalf.
 
-Never put passwords, access tokens, private keys, recovery phrases, or confidential personal data in the task. Known sensitive filenames are filtered, but no filename rule can recognize every secret embedded in ordinary source text.
+## Workflows and automations
 
-## While ChatMPD is working
+Save a successful command as a Workflow when you want to replay it later. Workflows retain the natural-language command and optional project folder.
 
-Do not start another ChatMPD window against the same project or edit the same files concurrently. The progress indicator is intentionally indeterminate; local inference can take several minutes.
+Automations store recurring or conditional local commands with a minimum one-minute interval. They remain inspectable and can be enabled, disabled, or deleted. Use clear conditions for watches so a recurring check does not create unnecessary noise.
+## Coding and verification
 
-Keep the application open until it reports completion. ChatMPD blocks window closure while it owns active work so it can finish file and local-model cleanup safely. The interface does not expose an unsafe cancel action. If you are playing ESO, the exact process `eso64.exe` selects the conservative local-model mode described below.
+Coding remains intentionally stricter than ordinary chat. ChatMPD profiles the selected Python project, limits reads/search/writes to the workspace, backs up eligible existing files, and permits only one pre-approved verification command. Verification runs against a filtered WSL/bubblewrap snapshot with networking disabled.
 
-## Review and recover
+A coding task cannot report success until the required check passes after the most recent write. The result surface exposes changed files and verification evidence. Do not interpret a passing test as proof of every possible behavior; keep normal source control and backups.
 
-Inspect the summary, changed paths, checks, and `.chatmpd/runs/<run-id>/run.json`. Use the first-edit backup under that run's `backups/` directory to restore an existing file, and delete unwanted newly created files manually after reviewing them.
+## Mobile
 
-**Checks passed** means ChatMPD's fixed command succeeded in the isolated project copy after the last recorded write. It does not prove that every possible behavior is correct. **Checks failed** means the task ended without satisfying that gate; review both the summary and modified files before retrying.
+Use **Connect phone** in the sidebar. Start mobile access, then use **Copy setup link**, QR, or the separate address/code buttons. The setup code is short-lived and one-time; the durable device credential is issued only after pairing.
 
-Use **Copy result** to put the nontechnical summary, changed-file list, checks, and record path on the clipboard. Use **Open run folder** to inspect the recovery record. Backups are per run and cover the original version of an eligible existing file the first time ChatMPD replaced it; a newly created file has no earlier version to restore.
+The phone is a thin client—Vader performs the inference and tool work. llama.cpp and ComfyUI remain loopback-only. ChatMPD does not open Windows Firewall automatically. Use the LAN gateway only on a trusted private network; use a private overlay for remote access rather than a public port forward.
 
-## Keyboard and display controls
+## Prompting
 
-| Action | Shortcut |
-| --- | --- |
-| Choose a project | `Ctrl+O` |
-| Focus the task composer | `Ctrl+L` |
-| Start a permitted task | `Ctrl+Enter` |
-| Copy the complete result | `Ctrl+Shift+C` |
-| Begin a new task after completion | `Ctrl+N` |
-| Increase or decrease text size | `Ctrl++` / `Ctrl+-` |
-| Restore 100% application text | `Ctrl+0` |
-| Open help | `F1` |
-| Close help or return to the composer | `Escape` |
+For complex work use **Goal → Context → Constraints → Desired result → Verification**. The integrated Prompt Guide can build this format, but ordinary language remains the default. See [Prompt Guide](prompt-guide.md) for practical templates.
 
-Use Tab and Shift+Tab to move through controls in visual order. Plain Enter adds a new line to the task instead of submitting it. System appearance follows the native Tk/Windows presentation where possible; Light and Dark provide tested custom palettes. Application text size steps from 90% to 160% and combines with Windows display scaling.
+## Recovery and diagnostics
 
-Every success, warning, and error includes a text label. Color is additional emphasis, not the only way to understand state.
+Control Center → Recovery lists managed snapshots and requires explicit confirmation before rollback. Control Center → Diagnostics runs platform health checks and offers only repairs to ChatMPD-owned folders, indexes, and configuration—it does not weaken Windows security controls.
+## Sharing
+
+The generic sharing format is `.chatmpdpack`. Exports use an explicit include list and automatically reject private ChatMPD state such as conversations, durable memory, credentials, tokens, authentication state, recovery data, and explicit-sex extensions.
+
+A recipient gets a generic ChatMPD by default and can then add models, skills, plugins, tools, workflows, packs, themes, or your curated shareable extensions. Large model/media weights remain external and retain their own licenses.
 
 ## Performance while playing ESO
 
-Immediately before starting the model it owns, ChatMPD checks for the exact Windows process name `eso64.exe`. When detected—or when detection cannot complete safely—it runs llama.cpp in CPU-only mode with one inference thread, one batch thread, one parallel request, and Windows IDLE process priority.
+When `eso64.exe` is detected, ChatMPD keeps the language runtime in the existing CPU-safe/idle-priority mode and refuses to start GPU media generation. Close ESO for maximum model/media performance. ESO and Minion also block addon mutations that could race their files.
 
-This reduces competition with the game but does not eliminate disk, memory, CPU, or WSL activity. Project inventory and snapshot creation still perform disk I/O, and isolated checks can still consume resources. For a large task or the smoothest play session, wait until after ESO is closed.
+## Important boundaries
 
-## Current limits
+Ordinary reversible work can run autonomously. Critical-impact actions—boot/firmware, disks/partitions, security controls, credentials, accounts/permissions, and similarly destructive system changes—still require explicit approval. Desktop control is disabled by default.
 
-- Supported projects must contain recognized Python files.
-- Verification is fixed to standard-library `unittest` discovery when suitable tests are recognized, otherwise Python `compileall`.
-- Model-visible reads, writes, and eligible backups are limited to 256 KiB per file.
-- The local model cannot choose an arbitrary shell command.
-- Verification runs in an offline WSL/bubblewrap copy, not against the live project.
-- ChatMPD does not fetch, push, create a branch, open a pull request, or mutate a remote.
-- There is no cloud model fallback, paid API, API key, vendor quota, or per-call fee.
-- ChatMPD is alpha software. The local model can misunderstand a request, make an incomplete change, or fail a valid task.
+Local voice TTS is available through Windows. Whisper transcription and visual understanding are local-only optional adapters: when a required local model/runtime is missing, ChatMPD reports that state instead of silently sending the data to a cloud service.
 
-## Troubleshooting
+## Keyboard note
 
-- Use [Windows setup](setup-windows.md) for llama.cpp, the model, WSL Ubuntu, and bubblewrap.
-- Use [Troubleshooting and recovery](troubleshooting.md) when doctor reports a missing prerequisite, the model does not start, checks fail, or you need to restore a file.
-- Use [Architecture](architecture.md) for the component and data flow.
-- Use [Security model](security.md) for enforced boundaries, residual risks, and records.
+In the modern WebView conversation composer, **Enter sends** and **Shift+Enter adds a new line**. The retained legacy/source project-runner interface uses **Ctrl+Enter** to start its permitted task; this shortcut remains documented for compatibility and troubleshooting.
 
-When asking for help, share the exact non-secret error text, whether `doctor` succeeds, the selected project's general structure, and the run-record path. Remove credentials and confidential source content before sharing anything outside your computer.
+## Credentials
+
+Never put passwords, API keys, recovery phrases, private keys, or access tokens in ordinary prompts, reusable skills, or chat memory. Store optional connector credentials through ChatMPD's encrypted Secrets interface instead.

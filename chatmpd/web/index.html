@@ -36,6 +36,7 @@
     </div>
     <nav id="conversation-list" class="conversation-list" aria-label="Recent conversations"></nav>
     <div class="sidebar-bottom">
+      <button id="control-center" class="sidebar-action" type="button"><span>⚙</span><span>Control Center</span></button>
       <button id="mobile-access" class="sidebar-action" type="button"><span>▣</span><span>Connect phone</span></button>
       <button id="theme-button" class="sidebar-action" type="button"><span>◐</span><span>Appearance</span></button>
       <div class="runtime-row" title="Local runtime status">
@@ -112,6 +113,37 @@
       </div>
       <p id="pairing-code-label" class="pairing-code"></p>
       <button id="mobile-stop" class="danger-text" type="button">Stop mobile access</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="control-dialog" class="modal control-modal" aria-labelledby="control-title">
+  <form method="dialog" class="modal-card control-card">
+    <div class="modal-heading">
+      <div><h2 id="control-title">Control Center</h2><p>Memory, models, skills, tools, automation, recovery, and sharing.</p></div>
+      <button class="icon-button" value="cancel" aria-label="Close">×</button>
+    </div>
+    <div class="control-layout">
+      <nav class="control-nav" aria-label="Control Center sections">
+        <button type="button" data-control-section="overview">Overview</button>
+        <button type="button" data-control-section="memory">Memory</button>
+        <button type="button" data-control-section="knowledge">Knowledge</button>
+        <button type="button" data-control-section="capabilities">Skills &amp; Tools</button>
+        <button type="button" data-control-section="models">Models</button>
+        <button type="button" data-control-section="workflows">Workflows</button>
+        <button type="button" data-control-section="automations">Automations</button>
+        <button type="button" data-control-section="recovery">Recovery</button>
+        <button type="button" data-control-section="prompts">Prompt Guide</button>
+        <button type="button" data-control-section="diagnostics">Diagnostics</button>
+        <button type="button" data-control-section="sharing">Sharing</button>
+      </nav>
+      <section class="control-main" aria-live="polite">
+        <div class="control-toolbar">
+          <div><strong id="control-section-title">Overview</strong><span id="control-section-subtitle">Local ChatMPD platform</span></div>
+          <button id="control-refresh" type="button">Refresh</button>
+        </div>
+        <div id="control-content" class="control-content"></div>
+      </section>
     </div>
   </form>
 </dialog>

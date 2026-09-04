@@ -16,6 +16,7 @@ from .ltxvideo import FFmpegAssembler, LTXVideoWorkflowBuilder, plan_video_segme
 from .model_registry import LocalModel, ModelRegistry
 from .model_runtime import ModelRuntimeManager
 from .orchestrator import ChatMPDOrchestrator
+from .platform_services import build_platform_services
 from .runtime import LlamaCppRuntime, RuntimeConfig
 from .system_capability import SystemInspector
 from .vortex import VortexInventory
@@ -228,10 +229,14 @@ class DefaultMediaSpecialist:
 
 def build_default_orchestrator() -> ChatMPDOrchestrator:
     registry = default_model_registry()
-    manager = ModelRuntimeManager(registry, runtime_factory=_runtime_for_model)
+    services = build_platform_services(model_registry=registry)
+    manager = ModelRuntimeManager(
+        registry, runtime_factory=_runtime_for_model, selector=services.models.choose
+    )
     assistant = DesktopAssistant(
         model_manager=manager,
         provider_factory=lambda endpoint: LlamaCppProvider(endpoint, timeout=300),
+        context_provider=services.retrieval_context,
     )
     media = DefaultMediaSpecialist()
 
@@ -244,7 +249,7 @@ def build_default_orchestrator() -> ChatMPDOrchestrator:
     def system_handler(_text: str) -> dict[str, Any]:
         return system_snapshot_summary(SystemInspector().snapshot())
 
-    return ChatMPDOrchestrator(
+    orchestrator = ChatMPDOrchestrator(
         assistant=assistant,
         specialist_handlers={
             "eso": eso_handler,
@@ -252,4 +257,18 @@ def build_default_orchestrator() -> ChatMPDOrchestrator:
             "system": system_handler,
             "media": media,
         },
+        platform_services=services,
     )
+
+    def automation_runner(command: str) -> str:
+        try:
+            result = orchestrator.command(command)
+            services.activity.record("automation", result.message, details={"capability": result.capability})
+            return result.message
+        except Exception as error:
+            message = f"{type(error).__name__}: {error}"
+            services.activity.record("automation", "Automation run failed.", details={"error": message[:500]})
+            return message
+
+    services.bind_automation_runner(automation_runner)
+    return orchestrator

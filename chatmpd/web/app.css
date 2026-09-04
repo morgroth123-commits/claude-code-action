@@ -223,3 +223,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .pair-icon { width: 54px; height: 54px; border-radius: 14px; }
 .pair-error { min-height: 20px; color: #c85151 !important; font-size: 12px; }
 body.mobile-client #mobile-access { display: none; }
+
+.control-modal { width: min(1120px, calc(100vw - 28px)); }
+.control-card { width: min(1080px, calc(100vw - 52px)); max-width: none; min-height: min(760px, calc(100vh - 72px)); }
+.control-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 18px; min-height: 560px; }
+.control-nav { display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--border); padding-right: 14px; }
+.control-nav button { text-align: left; border: 0; background: transparent; padding: 10px 12px; border-radius: 9px; color: var(--text); }
+.control-nav button:hover, .control-nav button.active { background: var(--surface-2); }
+.control-main { min-width: 0; display: flex; flex-direction: column; }
+.control-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.control-toolbar > div { display: grid; gap: 2px; }
+.control-toolbar span { color: var(--muted); font-size: 12px; }
+.control-content { display: grid; gap: 12px; padding: 16px 2px; overflow: auto; max-height: 620px; }
+.control-card-item { border: 1px solid var(--border); background: var(--surface-2); border-radius: 12px; padding: 13px; display: grid; gap: 6px; }
+.control-card-item p { margin: 0; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.control-form { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+.control-form input, .control-form textarea, .control-form select { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); padding: 9px; }
+.control-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.control-actions button { width: auto; }
+.control-empty { color: var(--muted); padding: 28px 8px; text-align: center; }
+body.mobile-client #control-center { display: none; }
