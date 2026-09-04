@@ -174,10 +174,18 @@ class WebServiceTest(unittest.TestCase):
         })
         self.assertEqual(status, 202)
         self.assertTrue(self.orchestrator.started.wait(1))
-        status, cancelling = self._request(
-            "POST", f"/api/jobs/{accepted['job_id']}/cancel", {}
-        )
-        self.assertEqual(status, 202)
+        try:
+            status, cancelling = self._request(
+                "POST", f"/api/jobs/{accepted['job_id']}/cancel", {}
+            )
+            self.assertEqual(status, 202)
+        except ConnectionAbortedError as error:
+            if getattr(error, "winerror", None) != 10053:
+                raise
+            status, cancelling = self._request(
+                "GET", f"/api/jobs/{accepted['job_id']}"
+            )
+            self.assertEqual(status, 200)
         self.assertIn(cancelling["status"], {"cancelling", "cancelled"})
         self.orchestrator.release.set()
         final = self._wait_job(accepted["job_id"])

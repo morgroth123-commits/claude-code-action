@@ -21,6 +21,7 @@ The normal interface is `ChatMPD.exe`. Desktop and phone use the same orchestrat
 - Local Windows TTS, optional local Whisper transcription, screenshots, local-only vision adapter, and disabled-by-default desktop control.
 - One-time mobile pairing with Copy setup link, QR, address/code fallbacks, and revocable device credentials.
 - Reusable workflows, recurring/conditional automation storage, evidence timeline, recovery snapshots, and sanitized `.chatmpdpack` export.
+- Headless `chatmpd automations` mode for recurring local tasks when the desktop UI is not running.
 ## Vader model/media stack
 
 | Role | Default |

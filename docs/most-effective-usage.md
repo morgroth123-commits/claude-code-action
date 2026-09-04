@@ -90,3 +90,7 @@ Use **Control Center → Performance → Analyze** whenever you want a read-only
 Use **Gaming** before a demanding game if you want ChatMPD to release its owned model runtime and maintain the high-performance profile. Use **AI / ChatMPD** when the machine is dedicated to local inference/media. **Balanced** returns to the captured baseline plan, and **Restore baseline** explicitly reapplies the original plan recorded before optimization.
 
 Adaptive mode is useful when moving between ESO and ChatMPD work: it changes only on workload transitions and never terminates unrelated applications. Analyze-only is always non-mutating. Security, boot, firmware, disk, account, credential, and similarly critical changes are outside automatic performance optimization.
+## Headless automation
+
+Use `python -m chatmpd automations --once` to run all currently due automations and exit. Use `python -m chatmpd automations` for the local automation daemon while a console session is intended to stay active. The daemon uses the same local orchestrator, permissions, models, and evidence boundaries as the desktop app.
+
