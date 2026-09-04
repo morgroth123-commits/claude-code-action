@@ -85,9 +85,9 @@ Never put passwords, API keys, recovery phrases, private keys, or access tokens 
 
 ## Performance Center
 
-Use **Control Center → Performance → Analyze** whenever you want a read-only snapshot of Vader. The dashboard shows overall/Gaming/AI/Balanced scores, the current bottleneck, GPU/VRAM telemetry when available, memory/storage headroom, power plan, workload state, and the top competing processes.
+Use **Control Center → Performance → Analyze** whenever you want a read-only snapshot of Vader. The dashboard shows overall/Gaming/AI/Balanced scores and only names a bottleneck when measured pressure is meaningful. Evidence includes CPU, RAM, commit/pagefile pressure, disk activity/queue/throughput, process CPU/RAM/I/O, GPU/VRAM/temperature/power, power plan, startup count, physical-disk health, workload state, and read-only Game Mode/HAGS state.
 
-Use **Gaming** before a demanding game if you want ChatMPD to release its owned model runtime and maintain the high-performance profile. Use **AI / ChatMPD** when the machine is dedicated to local inference/media. **Balanced** returns to the captured baseline plan, and **Restore baseline** explicitly reapplies the original plan recorded before optimization.
+Use **Gaming** before a demanding game if you want ChatMPD to release its owned model runtime and select Windows High Performance. Use **AI / ChatMPD** when the machine is dedicated to local inference/media; it also selects High Performance. **Balanced** selects the Windows Balanced scheme. **Restore baseline** is different: it explicitly reapplies the exact power plan that was active before ChatMPD first changed the profile.
 
 Adaptive mode is useful when moving between ESO and ChatMPD work: it changes only on workload transitions and never terminates unrelated applications. Analyze-only is always non-mutating. Security, boot, firmware, disk, account, credential, and similarly critical changes are outside automatic performance optimization.
 ## Headless automation

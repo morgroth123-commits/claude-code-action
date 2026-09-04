@@ -731,15 +731,22 @@ async function renderPerformanceSection() {
     const gpu = evidence.gpu || {};
     cards.push(controlCard("Live evidence",
       `CPU ${Math.round(evidence.cpu_percent || 0)}% · RAM ${Math.round(100 * (1 - (evidence.memory_available_bytes || 0) / Math.max(1, evidence.memory_total_bytes || 1)))}% used · ` +
+      `Commit ${Number(evidence.commit_percent || 0).toFixed(0)}% · Pagefile ${Number(evidence.pagefile_percent || 0).toFixed(0)}% · ` +
+      `Disk ${Number(evidence.disk_active_percent || 0).toFixed(0)}% active / queue ${Number(evidence.disk_queue_length || 0).toFixed(1)} / ${Number((evidence.disk_bytes_per_sec || 0) / 1048576).toFixed(1)} MiB/s · ` +
       `GPU ${gpu.utilization_percent ?? "?"}% · VRAM ${gpu.vram_used_mib ?? "?"}/${gpu.vram_total_mib ?? "?"} MiB · ` +
       `Power ${evidence.power_plan_name || "unknown"}`));
+    const gamingConfig = evidence.gaming_config || {};
+    const diskHealth = Array.isArray(evidence.disk_health) && evidence.disk_health.length
+      ? evidence.disk_health.join("\n") : "No physical-disk health warning reported";
+    cards.push(controlCard("Windows performance context",
+      `Game Mode ${gamingConfig.game_mode || "default"} · HAGS ${gamingConfig.hags || "default"} · startup entries ${evidence.startup_count ?? "?"}\n${diskHealth}`));
     for (const finding of latest.findings || []) {
       cards.push(controlCard(`${String(finding.severity || "info").toUpperCase()} · ${finding.key}`, finding.summary || ""));
     }
     const competitors = latest.top_processes || [];
     if (competitors.length) {
       const text = competitors.slice(0, 8).map((item) =>
-        `${item.name} (PID ${item.pid}) · CPU ${Number(item.cpu_percent || 0).toFixed(1)}% · RAM ${Math.round((item.memory_bytes || 0) / 1048576)} MiB`
+        `${item.name} (PID ${item.pid}) · CPU ${Number(item.cpu_percent || 0).toFixed(1)}% · RAM ${Math.round((item.memory_bytes || 0) / 1048576)} MiB · I/O ${Number((item.io_bytes_per_sec || 0) / 1048576).toFixed(1)} MiB/s`
       ).join("\n");
       cards.push(controlCard("Top competing processes", text));
     }

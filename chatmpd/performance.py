@@ -8,7 +8,7 @@ import os
 import re
 import subprocess
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
@@ -21,6 +21,7 @@ from .permissions import PermissionProfileStore
 from .platform_db import PlatformDatabase
 from .system_capability import SystemInspector
 
+BALANCED_GUID = "381b4222-f694-41f0-9685-ff5bb260df2e"
 HIGH_PERFORMANCE_GUID = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
 
 
@@ -34,6 +35,7 @@ class ProcessPressure:
     pid: int
     cpu_percent: float
     memory_bytes: int
+    io_bytes_per_sec: float = 0.0
 
 @dataclass(frozen=True)
 class PerformanceEvidence:
@@ -47,6 +49,14 @@ class PerformanceEvidence:
     power_plan_guid: str
     power_plan_name: str
     workloads: tuple[str, ...]
+    commit_percent: float = 0.0
+    pagefile_percent: float = 0.0
+    disk_active_percent: float = 0.0
+    disk_queue_length: float = 0.0
+    disk_bytes_per_sec: float = 0.0
+    gaming_config: dict[str, str] = field(default_factory=dict)
+    startup_count: int = 0
+    disk_health: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -100,7 +110,10 @@ class PerformanceStore:
         evidence_data = dict(data["evidence"])
         evidence_data["processes"] = tuple(ProcessPressure(**item) for item in evidence_data.get("processes", ()))
         evidence_data["workloads"] = tuple(evidence_data.get("workloads", ()))
-        return PerformanceReport(            report_id=str(data["report_id"]),
+        evidence_data["gaming_config"] = dict(evidence_data.get("gaming_config") or {})
+        evidence_data["disk_health"] = tuple(evidence_data.get("disk_health") or ())
+        return PerformanceReport(
+            report_id=str(data["report_id"]),
             created_at=str(data["created_at"]),
             overall_score=int(data["overall_score"]),
             gaming_score=int(data["gaming_score"]),
@@ -127,20 +140,31 @@ class PerformanceAnalyzer:
     def analyze(self) -> PerformanceReport:
         evidence = self._probe()
         components, confidence = self._components(evidence)
-        gaming = _clamp(.25 * components["cpu"] + .20 * components["memory"] +
-                        .30 * components["gpu"] + .15 * components["vram"] + .10 * components["storage"])
-        ai = _clamp(.15 * components["cpu"] + .20 * components["memory"] +
-                    .20 * components["gpu"] + .35 * components["vram"] + .10 * components["storage"])
-        balanced = _clamp(.30 * components["cpu"] + .30 * components["memory"] +
-                          .15 * components["gpu"] + .10 * components["vram"] + .15 * components["storage"])
+        gaming = _clamp(.22 * components["cpu"] + .18 * components["memory"] +
+                        .08 * components["commit"] + .27 * components["gpu"] +
+                        .15 * components["vram"] + .10 * components["disk"])
+        ai = _clamp(.12 * components["cpu"] + .18 * components["memory"] +
+                    .15 * components["commit"] + .18 * components["gpu"] +
+                    .27 * components["vram"] + .10 * components["disk"])
+        balanced = _clamp(.28 * components["cpu"] + .22 * components["memory"] +
+                          .10 * components["commit"] + .15 * components["gpu"] +
+                          .10 * components["vram"] + .15 * components["disk"])
         overall = _clamp((gaming + ai + balanced) / 3)
         available = {key: value for key, value in components.items()
                      if key not in {"gpu", "vram"} or evidence.gpu}
-        bottleneck = min(available, key=available.get) if available else "unknown"
+        if available:
+            lowest = min(available, key=available.get)
+            bottleneck = lowest if available[lowest] < 50.0 else "none"
+        else:
+            bottleneck = "unknown"
         findings = self._findings(components, evidence)
         top = tuple(sorted(
             evidence.processes,
-            key=lambda item: (item.cpu_percent, item.memory_bytes),
+            key=lambda item: (
+                item.cpu_percent
+                + min(100.0, item.memory_bytes / (1024 ** 3) * 10.0)
+                + min(100.0, item.io_bytes_per_sec / (1024 ** 2))
+            ),
             reverse=True,
         )[:8])
         report = PerformanceReport(
@@ -164,7 +188,13 @@ class PerformanceAnalyzer:
                   if evidence.memory_total_bytes else 50.0)
         free_percent = (100.0 * evidence.disk_free_bytes / evidence.disk_total_bytes
                         if evidence.disk_total_bytes else 25.0)
-        storage = min(100.0, free_percent * 4.0)
+        capacity = min(100.0, free_percent * 4.0)
+        disk_idle = max(0.0, 100.0 - float(evidence.disk_active_percent))
+        queue_headroom = max(0.0, 100.0 - 20.0 * float(evidence.disk_queue_length))
+        disk = .20 * capacity + .50 * disk_idle + .30 * queue_headroom
+        pressure_known = evidence.commit_percent > 0 or evidence.pagefile_percent > 0
+        commit = min(100.0 - float(evidence.commit_percent),
+                     100.0 - float(evidence.pagefile_percent)) if pressure_known else memory
         gpu_present = bool(evidence.gpu)
         gpu = 100.0 - float(evidence.gpu.get("utilization_percent", 40.0)) if gpu_present else 60.0
         total_vram = float(evidence.gpu.get("vram_total_mib", 0.0)) if gpu_present else 0.0
@@ -173,7 +203,8 @@ class PerformanceAnalyzer:
         components = {
             "cpu": max(0.0, 100.0 - float(evidence.cpu_percent)),
             "memory": max(0.0, min(100.0, memory)),
-            "storage": max(0.0, min(100.0, storage)),
+            "commit": max(0.0, min(100.0, commit)),
+            "disk": max(0.0, min(100.0, disk)),
             "gpu": max(0.0, min(100.0, gpu)),
             "vram": max(0.0, min(100.0, vram)),
         }
@@ -187,7 +218,8 @@ class PerformanceAnalyzer:
         labels = {
             "cpu": "CPU headroom is low.",
             "memory": "Available system memory is low.",
-            "storage": "System drive free-space headroom is low.",
+            "commit": "Committed memory or pagefile pressure is high.",
+            "disk": "Disk activity or queue pressure is high.",
             "gpu": "GPU utilization leaves little headroom.",
             "vram": "GPU VRAM headroom is low.",
         }
@@ -198,6 +230,20 @@ class PerformanceAnalyzer:
             if value < 25:
                 severity = "high" if value < 10 else "medium"
                 findings.append(PerformanceFinding(key, severity, labels[key], round(value, 1)))
+        if evidence.startup_count >= 30:
+            findings.append(PerformanceFinding(
+                "startup", "medium",
+                "Many startup entries can add background contention after sign-in.",
+                float(evidence.startup_count),
+            ))
+        unhealthy = [item for item in evidence.disk_health
+                     if any(word in item.casefold() for word in ("warning", "degraded", "unhealthy", "error", "failed"))]
+        if unhealthy:
+            findings.append(PerformanceFinding(
+                "disk-health", "high",
+                "Windows reports a physical disk health or operational warning.",
+                float(len(unhealthy)),
+            ))
         return tuple(findings)
 
 class _FileTime(ctypes.Structure):
@@ -252,25 +298,43 @@ def _powershell_process_rows() -> list[dict[str, Any]]:
         return []
 
 
-def _process_probe(sample_seconds: float = 0.2) -> tuple[ProcessPressure, ...]:
-    first = {int(row.get("Id", -1)): row for row in _powershell_process_rows()}
-    started = time.monotonic()
-    time.sleep(max(0.05, min(float(sample_seconds), 0.5)))
-    second_rows = _powershell_process_rows()
-    elapsed = max(0.05, time.monotonic() - started)
-    logical = max(1, int(os.cpu_count() or 1))
+def parse_process_pressure_rows(rows: list[dict[str, Any]], *, logical_cpus: int | None = None) -> tuple[ProcessPressure, ...]:
+    logical = max(1, int(logical_cpus or os.cpu_count() or 1))
     results: list[ProcessPressure] = []
-    for row in second_rows:
+    for row in rows:
         try:
-            pid = int(row.get("Id", 0))
-            current_cpu = float(row.get("CPU") or 0.0)
-            previous_cpu = float(first.get(pid, {}).get("CPU") or current_cpu)
-            cpu = max(0.0, min(100.0, 100.0 * (current_cpu - previous_cpu) / elapsed / logical))
-            results.append(ProcessPressure(str(row.get("ProcessName") or "unknown"), pid, cpu,
-                                           int(row.get("WorkingSet64") or 0)))
+            pid = int(row.get("IDProcess") or 0)
+            if pid <= 0:
+                continue
+            name = re.sub(r"#\d+$", "", str(row.get("Name") or "unknown"))
+            cpu = max(0.0, min(100.0, float(row.get("PercentProcessorTime") or 0) / logical))
+            results.append(ProcessPressure(
+                name, pid, cpu, int(row.get("WorkingSet") or 0),
+                max(0.0, float(row.get("IODataBytesPersec") or 0)),
+            ))
         except (TypeError, ValueError):
             continue
     return tuple(results)
+
+
+def _process_probe(sample_seconds: float = 0.2) -> tuple[ProcessPressure, ...]:
+    command = [
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+        "Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | "
+        "Where-Object {$_.IDProcess -gt 0 -and $_.Name -ne '_Total'} | "
+        "Select Name,IDProcess,PercentProcessorTime,WorkingSet,IODataBytesPersec | ConvertTo-Json -Compress",
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=8, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if completed.returncode != 0 or not completed.stdout.strip():
+            return ()
+        data = json.loads(completed.stdout)
+        rows = data if isinstance(data, list) else [data]
+        return parse_process_pressure_rows([dict(row) for row in rows if isinstance(row, dict)])
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return ()
+
 
 def _gpu_probe() -> dict[str, Any]:
     command = [
@@ -316,6 +380,61 @@ def _power_plan() -> tuple[str, str]:
         pass
     return "", "Unknown"
 
+def parse_windows_pressure_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    memory = dict(payload.get("memory") or {})
+    disk = dict(payload.get("disk") or {})
+    pagefiles = payload.get("pagefile") or ()
+    if isinstance(pagefiles, dict):
+        pagefiles = (pagefiles,)
+    allocated = sum(float(item.get("AllocatedBaseSize") or 0) for item in pagefiles if isinstance(item, dict))
+    used = sum(float(item.get("CurrentUsage") or 0) for item in pagefiles if isinstance(item, dict))
+    game_mode = payload.get("game_mode")
+    hags = payload.get("hags")
+    gaming = {
+        "game_mode": "enabled" if game_mode == 1 else "disabled" if game_mode == 0 else "default",
+        "hags": "enabled" if hags == 2 else "disabled" if hags == 1 else "default",
+    }
+    disks = payload.get("physical_disks") or ()
+    if isinstance(disks, dict):
+        disks = (disks,)
+    health = tuple(
+        " · ".join(str(item.get(key) or "unknown") for key in
+                   ("FriendlyName", "MediaType", "HealthStatus", "OperationalStatus"))
+        for item in disks if isinstance(item, dict)
+    )
+    return {
+        "commit_percent": max(0.0, min(100.0, float(memory.get("PercentCommittedBytesInUse") or 0))),
+        "pagefile_percent": max(0.0, min(100.0, 100.0 * used / allocated)) if allocated else 0.0,
+        "disk_active_percent": max(0.0, min(100.0, float(disk.get("PercentDiskTime") or 0))),
+        "disk_queue_length": max(0.0, float(disk.get("CurrentDiskQueueLength") or 0)),
+        "disk_bytes_per_sec": max(0.0, float(disk.get("DiskBytesPersec") or 0)),
+        "gaming_config": gaming,
+        "startup_count": max(0, int(payload.get("startup_count") or 0)),
+        "disk_health": health,
+    }
+
+
+def _windows_pressure_probe() -> dict[str, Any]:
+    command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+        "$m=Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory | Select PercentCommittedBytesInUse,PagesPersec; "
+        "$d=Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk | Where-Object Name -eq '_Total' | Select PercentDiskTime,CurrentDiskQueueLength,DiskBytesPersec; "
+        "$p=Get-CimInstance Win32_PageFileUsage | Select AllocatedBaseSize,CurrentUsage; "
+        "$gm=(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\GameBar' -ErrorAction SilentlyContinue).AutoGameModeEnabled; "
+        "$hags=(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers' -ErrorAction SilentlyContinue).HwSchMode; "
+        "$startup=@(Get-CimInstance Win32_StartupCommand -ErrorAction SilentlyContinue).Count; "
+        "$pd=@(Get-PhysicalDisk -ErrorAction SilentlyContinue | Select FriendlyName,MediaType,HealthStatus,OperationalStatus); "
+        "[pscustomobject]@{memory=$m;disk=$d;pagefile=@($p);game_mode=$gm;hags=$hags;startup_count=$startup;physical_disks=$pd} | ConvertTo-Json -Depth 4 -Compress"]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=8, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if completed.returncode != 0 or not completed.stdout.strip():
+            return {}
+        data = json.loads(completed.stdout)
+        return parse_windows_pressure_payload(data) if isinstance(data, dict) else {}
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, TypeError, ValueError):
+        return {}
+
+
 def collect_performance_evidence() -> PerformanceEvidence:
     system = SystemInspector(gpu_probe=lambda: {}).snapshot()
     processes = _process_probe()
@@ -332,6 +451,7 @@ def collect_performance_evidence() -> PerformanceEvidence:
         if names.intersection(markers):
             workloads.append(label)
     power_guid, power_name = _power_plan()
+    pressure = _windows_pressure_probe()
     return PerformanceEvidence(
         cpu_percent=_cpu_percent(),
         memory_total_bytes=system.memory_total_bytes,
@@ -343,6 +463,14 @@ def collect_performance_evidence() -> PerformanceEvidence:
         power_plan_guid=power_guid,
         power_plan_name=power_name,
         workloads=tuple(workloads),
+        commit_percent=float(pressure.get("commit_percent", 0.0)),
+        pagefile_percent=float(pressure.get("pagefile_percent", 0.0)),
+        disk_active_percent=float(pressure.get("disk_active_percent", 0.0)),
+        disk_queue_length=float(pressure.get("disk_queue_length", 0.0)),
+        disk_bytes_per_sec=float(pressure.get("disk_bytes_per_sec", 0.0)),
+        gaming_config=dict(pressure.get("gaming_config") or {}),
+        startup_count=int(pressure.get("startup_count", 0)),
+        disk_health=tuple(pressure.get("disk_health") or ()),
     )
 
 
@@ -387,7 +515,7 @@ class VaderOptimizer:
         if not state.get("baseline_guid"):
             state["baseline_guid"] = current_guid
             state["baseline_name"] = current_name
-        target = str(state.get("baseline_guid") or current_guid) if clean == "balanced" else HIGH_PERFORMANCE_GUID
+        target = BALANCED_GUID if clean == "balanced" else HIGH_PERFORMANCE_GUID
         if clean == "gaming":
             self._release_runtime()
         changed = bool(target and target.casefold() != current_guid.casefold())

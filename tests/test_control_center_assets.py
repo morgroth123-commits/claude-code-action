@@ -47,3 +47,20 @@ class CivitaiControlCenterAssetTest(unittest.TestCase):
         self.assertIn("civitai-api-key", script)
         self.assertIn("List Civitai tools", script)
         self.assertNotIn("innerHTML", script)
+
+
+class PerformanceControlCenterAssetTest(unittest.TestCase):
+    def test_performance_section_renders_pressure_and_io_signals(self) -> None:
+        script = (WEB / "app.js").read_text(encoding="utf-8")
+        for required in (
+            "commit_percent", "pagefile_percent", "disk_active_percent",
+            "disk_queue_length", "disk_bytes_per_sec", "io_bytes_per_sec",
+        ):
+            self.assertIn(required, script)
+
+
+class PerformanceWindowsContextAssetTest(unittest.TestCase):
+    def test_performance_section_renders_windows_context_read_only(self) -> None:
+        script = (WEB / "app.js").read_text(encoding="utf-8")
+        for required in ("gaming_config", "startup_count", "disk_health"):
+            self.assertIn(required, script)

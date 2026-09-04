@@ -185,3 +185,173 @@ class VaderOptimizerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PerformancePressureSignalsTest(unittest.TestCase):
+    def test_real_pressure_signals_drive_bottleneck_not_free_space_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            database = PlatformDatabase(Path(folder) / "platform.db")
+            evidence = PerformanceEvidence(
+                cpu_percent=12.0, memory_total_bytes=32 * GIB,
+                memory_available_bytes=22 * GIB, disk_total_bytes=500 * GIB,
+                disk_free_bytes=45 * GIB, gpu={"utilization_percent": 5.0,
+                "vram_total_mib": 12288, "vram_used_mib": 2000}, processes=(),
+                power_plan_guid="guid", power_plan_name="High performance", workloads=(),
+                commit_percent=42.0, pagefile_percent=3.0,
+                disk_active_percent=2.0, disk_queue_length=0.0, disk_bytes_per_sec=1_000_000.0,
+            )
+            report = PerformanceAnalyzer(
+                PerformanceStore(database), evidence_probe=lambda: evidence
+            ).analyze()
+            self.assertNotEqual(report.bottleneck, "storage")
+            self.assertFalse(any(item.key == "storage" for item in report.findings))
+
+    def test_disk_queue_and_commit_pressure_are_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            database = PlatformDatabase(Path(folder) / "platform.db")
+            evidence = PerformanceEvidence(
+                cpu_percent=20.0, memory_total_bytes=32 * GIB,
+                memory_available_bytes=18 * GIB, disk_total_bytes=500 * GIB,
+                disk_free_bytes=250 * GIB, gpu={}, processes=(),
+                power_plan_guid="guid", power_plan_name="Balanced", workloads=(),
+                commit_percent=92.0, pagefile_percent=55.0,
+                disk_active_percent=98.0, disk_queue_length=6.0, disk_bytes_per_sec=80_000_000.0,
+            )
+            report = PerformanceAnalyzer(
+                PerformanceStore(database), evidence_probe=lambda: evidence
+            ).analyze()
+            keys = {item.key for item in report.findings}
+            self.assertIn("commit", keys)
+            self.assertIn("disk", keys)
+
+
+class PerformanceProbeParsingTest(unittest.TestCase):
+    def test_parses_windows_commit_pagefile_and_disk_counters(self) -> None:
+        from chatmpd.performance import parse_windows_pressure_payload
+        payload = {
+            "memory": {"PercentCommittedBytesInUse": 61, "PagesPersec": 3},
+            "disk": {"PercentDiskTime": 27, "CurrentDiskQueueLength": 2,
+                     "DiskBytesPersec": 12_500_000},
+            "pagefile": [{"AllocatedBaseSize": 8192, "CurrentUsage": 2048}],
+        }
+        parsed = parse_windows_pressure_payload(payload)
+        self.assertEqual(parsed["commit_percent"], 61.0)
+        self.assertEqual(parsed["pagefile_percent"], 25.0)
+        self.assertEqual(parsed["disk_active_percent"], 27.0)
+        self.assertEqual(parsed["disk_queue_length"], 2.0)
+        self.assertEqual(parsed["disk_bytes_per_sec"], 12_500_000.0)
+
+    def test_high_io_process_is_kept_in_competing_processes(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            database = PlatformDatabase(Path(folder) / "platform.db")
+            processes = [ProcessPressure(f"cpu{n}", n, 90 - n, 200 * 1024**2)
+                         for n in range(10)]
+            processes.append(ProcessPressure("iohog", 99, 1.0, 100 * 1024**2,
+                                             io_bytes_per_sec=900 * 1024**2))
+            evidence = PerformanceEvidence(
+                cpu_percent=20, memory_total_bytes=32*GIB, memory_available_bytes=20*GIB,
+                disk_total_bytes=500*GIB, disk_free_bytes=250*GIB, gpu={},
+                processes=tuple(processes), power_plan_guid="g", power_plan_name="Balanced",
+                workloads=(), commit_percent=40, disk_active_percent=20,
+            )
+            report = PerformanceAnalyzer(PerformanceStore(database),
+                                         evidence_probe=lambda: evidence).analyze()
+            self.assertIn("iohog", {item.name for item in report.top_processes})
+
+    def test_parses_process_io_pressure_from_windows_perf_rows(self) -> None:
+        from chatmpd.performance import parse_process_pressure_rows
+        rows = [{"Name": "ChatMPD#2", "IDProcess": 42,
+                 "PercentProcessorTime": 120, "WorkingSet": 512 * 1024**2,
+                 "IODataBytesPersec": 64 * 1024**2}]
+        parsed = parse_process_pressure_rows(rows, logical_cpus=6)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0].name, "ChatMPD")
+        self.assertEqual(parsed[0].pid, 42)
+        self.assertAlmostEqual(parsed[0].cpu_percent, 20.0)
+        self.assertEqual(parsed[0].io_bytes_per_sec, 64 * 1024**2)
+
+
+class PerformanceProfileSemanticsTest(unittest.TestCase):
+    def test_balanced_profile_uses_windows_balanced_and_restore_returns_user_baseline(self) -> None:
+        from chatmpd.performance import BALANCED_GUID
+        with tempfile.TemporaryDirectory() as folder:
+            database = PlatformDatabase(Path(folder) / "platform.db")
+            current = {"guid": HIGH_PERFORMANCE}
+            writes = []
+            def setter(guid: str) -> None:
+                writes.append(guid); current["guid"] = guid
+            optimizer = VaderOptimizer(
+                database=database, permissions=PermissionProfileStore(database),
+                activity=ActivityLog(database),
+                power_getter=lambda: (current["guid"], "Current"), power_setter=setter,
+            )
+            result = optimizer.apply("balanced")
+            self.assertEqual(result.power_plan_guid, BALANCED_GUID)
+            self.assertEqual(writes[-1], BALANCED_GUID)
+            restored = optimizer.restore()
+            self.assertEqual(restored.power_plan_guid, HIGH_PERFORMANCE)
+            self.assertEqual(writes[-1], HIGH_PERFORMANCE)
+
+
+class PerformanceWindowsContextTest(unittest.TestCase):
+    def test_parses_gaming_startup_and_disk_health_context(self) -> None:
+        from chatmpd.performance import parse_windows_pressure_payload
+        payload = {
+            "memory": {}, "disk": {}, "pagefile": [],
+            "game_mode": 1, "hags": 2, "startup_count": 17,
+            "physical_disks": [
+                {"FriendlyName": "NVMe", "MediaType": "SSD",
+                 "HealthStatus": "Healthy", "OperationalStatus": "OK"},
+            ],
+        }
+        parsed = parse_windows_pressure_payload(payload)
+        self.assertEqual(parsed["gaming_config"]["game_mode"], "enabled")
+        self.assertEqual(parsed["gaming_config"]["hags"], "enabled")
+        self.assertEqual(parsed["startup_count"], 17)
+        self.assertIn("NVMe", parsed["disk_health"][0])
+        self.assertIn("Healthy", parsed["disk_health"][0])
+
+    def test_unhealthy_disk_and_large_startup_load_become_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            database = PlatformDatabase(Path(folder) / "platform.db")
+            evidence = PerformanceEvidence(
+                cpu_percent=10, memory_total_bytes=32*GIB, memory_available_bytes=20*GIB,
+                disk_total_bytes=500*GIB, disk_free_bytes=250*GIB, gpu={}, processes=(),
+                power_plan_guid="g", power_plan_name="Balanced", workloads=(),
+                commit_percent=45, disk_active_percent=2,
+                startup_count=40, disk_health=("NVMe · Warning · Degraded",),
+            )
+            report = PerformanceAnalyzer(PerformanceStore(database),
+                                         evidence_probe=lambda: evidence).analyze()
+            keys = {item.key for item in report.findings}
+            self.assertIn("startup", keys)
+            self.assertIn("disk-health", keys)
+
+
+class PerformanceSourceQualityTest(unittest.TestCase):
+    def test_performance_module_compiles_without_syntax_warnings(self) -> None:
+        import warnings
+        source_path = Path(__file__).resolve().parents[1] / "chatmpd" / "performance.py"
+        source = source_path.read_text(encoding="utf-8")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", SyntaxWarning)
+            compile(source, str(source_path), "exec")
+
+
+class PerformanceBottleneckSemanticsTest(unittest.TestCase):
+    def test_healthy_machine_reports_no_active_bottleneck(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            database = PlatformDatabase(Path(folder) / "platform.db")
+            evidence = PerformanceEvidence(
+                cpu_percent=15, memory_total_bytes=32*GIB, memory_available_bytes=20*GIB,
+                disk_total_bytes=500*GIB, disk_free_bytes=200*GIB,
+                gpu={"utilization_percent": 10, "vram_total_mib": 12288,
+                     "vram_used_mib": 3000}, processes=(),
+                power_plan_guid=HIGH_PERFORMANCE, power_plan_name="High performance",
+                workloads=(), commit_percent=48, pagefile_percent=4,
+                disk_active_percent=3, disk_queue_length=0,
+            )
+            report = PerformanceAnalyzer(PerformanceStore(database),
+                                         evidence_probe=lambda: evidence).analyze()
+            self.assertEqual(report.bottleneck, "none")
+            self.assertEqual(report.findings, ())

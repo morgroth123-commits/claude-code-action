@@ -64,6 +64,6 @@ The mobile gateway serves the same frontend over a private network. Pairing uses
 
 `chatmpd.performance` is the host-performance subsystem. `PerformanceAnalyzer` collects bounded read-only Windows evidence plus optional `nvidia-smi` telemetry, normalizes it into Gaming/AI/Balanced/overall scores, persists reports, and identifies the lowest-headroom component without inventing missing telemetry.
 
-`VaderOptimizer` owns reversible profile changes. It captures the original power plan before the first mutation, routes host changes through `PermissionProfileStore`, logs activity evidence, and can restore the captured plan. Gaming mode also releases ChatMPD-owned model resources; AI mode favors local compute when no game is active; Analyze-only performs no writes.
+`VaderOptimizer` owns reversible profile changes. Balanced selects the Windows Balanced scheme; Gaming and AI select High Performance while preserving the exact pre-optimization baseline for Restore. It captures the original power plan before the first mutation, routes host changes through `PermissionProfileStore`, logs activity evidence, and can restore the captured plan. Gaming mode also releases ChatMPD-owned model resources; AI mode favors local compute when no game is active; Analyze-only performs no writes.
 
 `AdaptivePerformanceController` polls at low frequency and switches only on workload transitions. The Performance Center is exposed through `PlatformServices`, loopback `/api/platform/performance` routes, and the WebView2 Control Center.
