@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111111">
+  <title>ChatMPD</title>
+  <link rel="icon" href="/chatmpd-192.png">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app-shell" id="app-shell">
+  <aside id="sidebar" class="sidebar" aria-label="Conversation navigation">
+    <div class="sidebar-top">
+      <div class="brand-row">
+        <img src="/chatmpd-192.png" alt="" class="brand-icon">
+        <strong>ChatMPD</strong>
+        <button id="sidebar-close" class="icon-button mobile-only" aria-label="Close sidebar">×</button>
+      </div>
+      <button id="new-chat" class="new-chat-button" type="button">＋ <span>New chat</span></button>
+      <label class="search-box" aria-label="Search conversations">
+        <span>⌕</span>
+        <input id="conversation-search" type="search" placeholder="Search chats" autocomplete="off">
+      </label>
+    </div>
+    <nav id="conversation-list" class="conversation-list" aria-label="Recent conversations"></nav>
+    <div class="sidebar-bottom">
+      <button id="mobile-access" class="sidebar-action" type="button"><span>▣</span><span>Connect phone</span></button>
+      <button id="theme-button" class="sidebar-action" type="button"><span>◐</span><span>Appearance</span></button>
+      <div class="runtime-row" title="Local runtime status">
+        <span id="runtime-dot" class="status-dot"></span>
+        <span id="runtime-label">Local · Ready</span>
+      </div>
+    </div>
+  </aside>
+
+  <section class="main-pane">
+    <header class="topbar">
+      <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Toggle sidebar">☰</button>
+      <div class="title-stack">
+        <strong id="conversation-title">New chat</strong>
+        <span id="capability-label" class="topbar-subtitle">Local assistant</span>
+      </div>
+      <div id="workspace-chip" class="workspace-chip" hidden></div>
+      <button id="conversation-menu" class="icon-button" type="button" aria-label="Conversation actions">•••</button>
+    </header>
+
+    <main id="transcript" class="transcript" aria-label="Conversation" aria-live="polite">
+      <section id="welcome" class="welcome-state">
+        <img src="/chatmpd-192.png" alt="" class="welcome-icon">
+        <h1>How can I help?</h1>
+        <p>Ask anything, work on a project, inspect Vader, manage ESO or Vortex, or create local media.</p>
+      </section>
+      <div id="messages" class="messages"></div>
+      <div id="working" class="working-row" hidden role="status" aria-live="polite">
+        <span class="thinking-dot"></span><span>ChatMPD is working locally…</span>
+      </div>
+    </main>
+    <footer class="composer-region">
+      <form id="composer" class="composer-shell" autocomplete="off">
+        <textarea id="prompt" rows="1" placeholder="Message ChatMPD" aria-label="Message ChatMPD"></textarea>
+        <div class="composer-tools">
+          <div class="composer-left">
+            <button id="project-button" class="round-button" type="button" aria-label="Choose project folder">＋</button>
+            <span id="project-label" class="composer-hint">Local on Vader</span>
+          </div>
+          <button id="send" class="send-button" type="submit" aria-label="Send message">↑</button>
+          <button id="stop" class="send-button stop-button" type="button" aria-label="Stop current task" hidden>■</button>
+        </div>
+      </form>
+      <p class="composer-note">ChatMPD can make mistakes. Verified actions show their checks.</p>
+    </footer>
+  </section>
+
+  <aside id="artifact-pane" class="artifact-pane" aria-label="Result viewer" hidden>
+    <header class="artifact-header">
+      <strong id="artifact-title">Result</strong>
+      <button id="artifact-close" class="icon-button" type="button" aria-label="Close result viewer">×</button>
+    </header>
+    <div id="artifact-content" class="artifact-content"></div>
+  </aside>
+</div>
+<div id="sidebar-scrim" class="scrim" hidden></div>
+
+<dialog id="mobile-dialog" class="modal" aria-labelledby="mobile-title">
+  <form method="dialog" class="modal-card">
+    <div class="modal-heading">
+      <div><h2 id="mobile-title">Connect your phone</h2><p>Use ChatMPD on your phone while Vader does the computing.</p></div>
+      <button class="icon-button" value="cancel" aria-label="Close">×</button>
+    </div>
+    <div id="mobile-off" class="modal-section">
+      <button id="mobile-start" class="primary-button" type="button">Start mobile access</button>
+    </div>
+    <div id="mobile-on" class="modal-section" hidden>
+      <div id="qr-box" class="qr-box" aria-label="Mobile setup QR code"></div>
+      <label>Setup link<input id="setup-link" readonly></label>
+      <div class="button-grid">
+        <button id="copy-setup-link" type="button">Copy setup link</button>
+        <button id="copy-address" type="button">Copy address</button>
+        <button id="copy-code" type="button">Copy code</button>
+      </div>
+      <p id="pairing-code-label" class="pairing-code"></p>
+      <button id="mobile-stop" class="danger-text" type="button">Stop mobile access</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="theme-dialog" class="modal" aria-labelledby="theme-title">
+  <form method="dialog" class="modal-card compact-card">
+    <div class="modal-heading"><h2 id="theme-title">Appearance</h2><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+    <div class="theme-options" role="radiogroup" aria-label="Theme">
+      <button type="button" data-theme-choice="system">System</button>
+      <button type="button" data-theme-choice="light">Light</button>
+      <button type="button" data-theme-choice="dark">Dark</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/app.js" defer></script>
+</body>
+</html>
