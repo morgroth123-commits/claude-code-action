@@ -142,3 +142,15 @@ class CivitaiWebPlatformTest(WebPlatformTest):
         })
         self.assertEqual(status, 200)
         self.assertIn("search_models:flux", result["content"][0]["text"])
+
+
+class PerformanceOptimizeWebTest(WebPlatformTest):
+    def test_one_click_optimize_and_recommendations_surface(self) -> None:
+        status, report = self.request("POST", "/api/platform/performance/analyze", {})
+        self.assertEqual(status, 200)
+        self.assertIn("recommendations", report)
+        status, optimized = self.request(
+            "POST", "/api/platform/performance/optimize", {}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(optimized["mode"], "balanced")

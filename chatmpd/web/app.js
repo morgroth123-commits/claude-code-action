@@ -693,10 +693,14 @@ async function renderPerformanceSection() {
     `${status.active_mode || "balanced"} · power plan ${status.current_power_plan_name || "unknown"}`
   );
   const actions = controlNode("div", "", "control-actions");
-  actions.append(controlAction("Analyze", async () => {
-    await api("/api/platform/performance/analyze", { method: "POST", body: "{}" });
+  actions.append(controlAction("Optimize for current workload", async () => {
+    await api("/api/platform/performance/optimize", { method: "POST", body: "{}" });
     await loadControlSection("performance");
   }, "primary-button"));
+  actions.append(controlAction("Analyze only", async () => {
+    await api("/api/platform/performance/analyze", { method: "POST", body: "{}" });
+    await loadControlSection("performance");
+  }));
   for (const mode of ["balanced", "gaming", "ai"]) {
     actions.append(controlAction(mode === "ai" ? "AI / ChatMPD" : mode[0].toUpperCase() + mode.slice(1), async () => {
       await api("/api/platform/performance/apply", {
@@ -723,7 +727,19 @@ async function renderPerformanceSection() {
       await loadControlSection("performance");
     }
   ));
+  modeCard.append(controlNode("small",
+    "Profiles change only reversible Windows power/runtime coordination. Security, firmware, disks, and unrelated apps are never altered here."));
   cards.push(modeCard);
+
+  if (status.last_optimization) {
+    const comparison = status.last_optimization;
+    const delta = Number(comparison.score_delta || 0);
+    const sign = delta > 0 ? "+" : "";
+    cards.push(controlCard(
+      "Last optimization",
+      `${comparison.mode || "profile"} · headroom ${comparison.before_score ?? "?"} → ${comparison.after_score ?? "?"} (${sign}${delta})`
+    ));
+  }
 
   if (latest) {
     const scores = controlNode("div", "", "performance-score-grid");
@@ -736,10 +752,33 @@ async function renderPerformanceSection() {
       card.append(controlNode("div", `${value ?? "?"}/100`, "score-value"));
       scores.append(card);
     }
-    const scoreWrap = controlCard(`Current bottleneck: ${latest.bottleneck || "unknown"}`,
-      `Telemetry confidence ${Math.round((latest.telemetry_confidence || 0) * 100)}%`);
+    const bottleneckLabels = {
+      none: "No active bottleneck", cpu: "CPU", memory: "RAM",
+      commit: "Memory commit", disk: "Storage", gpu: "GPU",
+      vram: "VRAM", unknown: "Unknown",
+    };
+    const scoreWrap = controlCard(
+      bottleneckLabels[latest.bottleneck] || `Bottleneck: ${latest.bottleneck || "unknown"}`,
+      `Telemetry confidence ${Math.round((latest.telemetry_confidence || 0) * 100)}% · Scores measure available headroom, not FPS or synthetic benchmark speed.`
+    );
     scoreWrap.append(scores);
     cards.push(scoreWrap);
+    const recommendations = latest.recommendations || [];
+    for (const recommendation of recommendations) {
+      const card = controlCard(
+        `${String(recommendation.priority || "info").toUpperCase()} · ${recommendation.title || "Recommendation"}`,
+        recommendation.detail || ""
+      );
+      if (recommendation.action_mode) {
+        card.append(controlAction(`Apply ${recommendation.action_mode === "ai" ? "AI / ChatMPD" : recommendation.action_mode} mode`, async () => {
+          await api("/api/platform/performance/apply", {
+            method: "POST", body: JSON.stringify({ mode: recommendation.action_mode }),
+          });
+          await loadControlSection("performance");
+        }));
+      }
+      cards.push(card);
+    }
   }
   if (latest?.evidence) {
     const evidence = latest.evidence;
@@ -749,7 +788,8 @@ async function renderPerformanceSection() {
       `Commit ${Number(evidence.commit_percent || 0).toFixed(0)}% · Pagefile ${Number(evidence.pagefile_percent || 0).toFixed(0)}% · ` +
       `Disk ${Number(evidence.disk_active_percent || 0).toFixed(0)}% active / queue ${Number(evidence.disk_queue_length || 0).toFixed(1)} / ${Number((evidence.disk_bytes_per_sec || 0) / 1048576).toFixed(1)} MiB/s · ` +
       `GPU ${gpu.utilization_percent ?? "?"}% · VRAM ${gpu.vram_used_mib ?? "?"}/${gpu.vram_total_mib ?? "?"} MiB · ` +
-      `Power ${evidence.power_plan_name || "unknown"}`));
+      `Power ${evidence.power_plan_name || "unknown"} · ` +
+      `Workloads ${(evidence.workloads || []).join(", ") || "general desktop"}`));
     const gamingConfig = evidence.gaming_config || {};
     const diskHealth = Array.isArray(evidence.disk_health) && evidence.disk_health.length
       ? evidence.disk_health.join("\n") : "No physical-disk health warning reported";

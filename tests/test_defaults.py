@@ -64,12 +64,15 @@ class DefaultSpecialistSummaryTest(unittest.TestCase):
         self.assertEqual(summary["gpu"]["name"], "RTX 3060")
 
 
-    def test_performance_command_requires_explicit_profile_but_supports_modes(self) -> None:
+    def test_performance_command_optimizes_current_workload_and_supports_explicit_modes(self) -> None:
         class Performance:
             def __init__(self): self.calls = []
             def analyze(self):
                 self.calls.append(("analyze",))
                 return SimpleNamespace(overall_score=82, gaming_score=84, ai_score=80, balanced_score=81, bottleneck="storage", findings=())
+            def optimize_current(self):
+                self.calls.append(("optimize_current",))
+                return SimpleNamespace(mode="balanced", message="Optimized current workload", changed=True)
             def apply(self, mode):
                 self.calls.append(("apply", mode))
                 return SimpleNamespace(mode=mode, message=f"Applied {mode}", changed=True)
@@ -81,8 +84,9 @@ class DefaultSpecialistSummaryTest(unittest.TestCase):
                 return {"adaptive_enabled": enabled, "adaptive_base_mode": base_mode}
         center = Performance()
         generic = performance_command_summary(center, "Optimize my PC performance")
-        self.assertEqual(center.calls, [("analyze",)])
-        self.assertIn("storage", generic["summary"])
+        self.assertEqual(center.calls, [("optimize_current",)])
+        self.assertEqual(generic["mode"], "balanced")
+        self.assertIn("Optimized current workload", generic["summary"])
         performance_command_summary(center, "Optimize for gaming performance")
         self.assertEqual(center.calls[-1], ("apply", "gaming"))
         performance_command_summary(center, "Restore my performance baseline")

@@ -190,6 +190,13 @@ class WebAppService:
                 if request.command == "POST" and len(segments) == 2 and segments[1] == "analyze":
                     self._json(request, 200, asdict(services.performance.analyze()))
                     return
+                if request.command == "POST" and len(segments) == 2 and segments[1] == "optimize":
+                    payload = self._read_json(request)
+                    result = services.performance.optimize_current(
+                        confirmed=bool(payload.get("confirmed", False))
+                    )
+                    self._json(request, 200, asdict(result))
+                    return
                 if request.command == "POST" and len(segments) == 2 and segments[1] == "apply":
                     payload = self._read_json(request)
                     result = services.performance.apply(str(payload.get("mode", "")), confirmed=bool(payload.get("confirmed", False)))

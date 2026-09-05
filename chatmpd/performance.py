@@ -68,6 +68,15 @@ class PerformanceFinding:
 
 
 @dataclass(frozen=True)
+class PerformanceRecommendation:
+    key: str
+    title: str
+    detail: str
+    priority: str
+    action_mode: str | None = None
+
+
+@dataclass(frozen=True)
 class PerformanceReport:
     report_id: str
     created_at: str
@@ -80,6 +89,7 @@ class PerformanceReport:
     evidence: PerformanceEvidence
     findings: tuple[PerformanceFinding, ...]
     top_processes: tuple[ProcessPressure, ...]
+    recommendations: tuple[PerformanceRecommendation, ...]
 
 class PerformanceStore:
     def __init__(self, database: PlatformDatabase | None = None) -> None:
@@ -124,6 +134,8 @@ class PerformanceStore:
             evidence=PerformanceEvidence(**evidence_data),
             findings=tuple(PerformanceFinding(**item) for item in data.get("findings", ())),
             top_processes=tuple(ProcessPressure(**item) for item in data.get("top_processes", ())),
+            recommendations=tuple(PerformanceRecommendation(**item)
+                                  for item in data.get("recommendations", ())),
         )
 
 
@@ -158,6 +170,7 @@ class PerformanceAnalyzer:
         else:
             bottleneck = "unknown"
         findings = self._findings(components, evidence)
+        recommendations = self._recommendations(findings, evidence, bottleneck)
         top = tuple(sorted(
             evidence.processes,
             key=lambda item: (
@@ -179,6 +192,7 @@ class PerformanceAnalyzer:
             evidence=evidence,
             findings=findings,
             top_processes=top,
+            recommendations=recommendations,
         )
         return self.store.save(report)
 
@@ -245,6 +259,73 @@ class PerformanceAnalyzer:
                 float(len(unhealthy)),
             ))
         return tuple(findings)
+
+    @staticmethod
+    def _recommendations(
+        findings: tuple[PerformanceFinding, ...],
+        evidence: PerformanceEvidence,
+        bottleneck: str,
+    ) -> tuple[PerformanceRecommendation, ...]:
+        recommendations: list[PerformanceRecommendation] = []
+        workloads = {item.casefold() for item in evidence.workloads}
+        if "eso" in workloads and evidence.power_plan_guid.casefold() != HIGH_PERFORMANCE_GUID:
+            recommendations.append(PerformanceRecommendation(
+                "profile", "Use Gaming mode while ESO is active",
+                "Gaming mode uses the Windows High performance plan and releases ChatMPD-owned model resources so they do not compete with the game.",
+                "high", "gaming",
+            ))
+        elif workloads.intersection({"chatmpd", "llama.cpp", "lm-studio", "bionic"}) and evidence.power_plan_guid.casefold() != HIGH_PERFORMANCE_GUID:
+            recommendations.append(PerformanceRecommendation(
+                "profile", "Use AI / ChatMPD mode for local inference",
+                "AI mode uses the Windows High performance plan while keeping ChatMPD's existing model and GPU coordination rules intact.",
+                "medium", "ai",
+            ))
+
+        finding_keys = {item.key for item in findings}
+        if finding_keys.intersection({"memory", "commit"}):
+            recommendations.append(PerformanceRecommendation(
+                "memory", "Reduce memory pressure",
+                "Pause or close nonessential high-memory applications shown below. ChatMPD will not close unrelated applications automatically.",
+                "high" if bottleneck in {"memory", "commit"} else "medium",
+            ))
+        if "cpu" in finding_keys:
+            recommendations.append(PerformanceRecommendation(
+                "cpu", "Reduce CPU contention",
+                "Pause or close nonessential high-CPU applications shown below; leave foreground game and ChatMPD work you still need running.",
+                "high" if bottleneck == "cpu" else "medium",
+            ))
+        if finding_keys.intersection({"gpu", "vram"}):
+            recommendations.append(PerformanceRecommendation(
+                "vram", "Free GPU headroom",
+                "Unload optional local AI/media workloads before gaming or heavy generation. ChatMPD releases its own managed model resources when switching workloads.",
+                "high" if bottleneck in {"gpu", "vram"} else "medium",
+            ))
+        if "disk" in finding_keys:
+            recommendations.append(PerformanceRecommendation(
+                "disk", "Reduce storage contention",
+                "Pause nonessential high-I/O work shown below and let the active game or model workload finish before starting another large disk task.",
+                "medium",
+            ))
+        if "startup" in finding_keys:
+            recommendations.append(PerformanceRecommendation(
+                "startup", "Review startup applications",
+                "Windows reports many startup entries. Review them manually and disable only software you recognize and do not need at sign-in.",
+                "low",
+            ))
+        if "disk-health" in finding_keys:
+            recommendations.append(PerformanceRecommendation(
+                "disk-health", "Protect data before tuning performance",
+                "Back up important data and inspect Windows storage health. ChatMPD will not attempt automatic drive repair.",
+                "high",
+            ))
+        if not recommendations:
+            recommendations.append(PerformanceRecommendation(
+                "healthy", "No urgent optimization needed",
+                "Current telemetry shows healthy headroom. Keep the existing profile unless you intentionally want Gaming or AI mode.",
+                "low",
+            ))
+        return tuple(recommendations)
+
 
 class _FileTime(ctypes.Structure):
     _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
@@ -677,6 +758,28 @@ class PerformanceCenter:
                 "before_score": before.overall_score, "after_score": after.overall_score,
                 "score_delta": after.overall_score - before.overall_score,
             }
+        return result
+
+    def optimize_current(self, *, confirmed: bool = False) -> OptimizationResult:
+        before = self.analyze()
+        workloads = {str(item).casefold() for item in before.evidence.workloads}
+        if "eso" in workloads or bool(self._workload_probe()):
+            mode = "gaming"
+        elif workloads.intersection({"chatmpd", "llama.cpp", "lm-studio", "bionic"}):
+            mode = "ai"
+        else:
+            mode = "balanced"
+        if mode != "gaming":
+            self._base_mode = mode
+        result = self.optimizer.apply(mode, confirmed=confirmed)
+        after = self.analyze()
+        self._last_optimization = {
+            "mode": mode, "before_report_id": before.report_id,
+            "after_report_id": after.report_id,
+            "before_score": before.overall_score, "after_score": after.overall_score,
+            "score_delta": after.overall_score - before.overall_score,
+            "automatic": True,
+        }
         return result
 
     def restore(self, *, confirmed: bool = False) -> OptimizationResult:

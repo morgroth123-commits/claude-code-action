@@ -63,6 +63,9 @@ class WebviewHostTest(unittest.TestCase):
         self.assertEqual(title, "ChatMPD")
         self.assertEqual(url, service.url)
         self.assertGreaterEqual(options["width"], 1100)
+        self.assertLessEqual(options["height"], 760)
+        self.assertTrue(options["maximized"])
+        self.assertLessEqual(options["min_size"][1], 560)
         self.assertEqual(webview.starts[0]["gui"], "edgechromium")
 
     def test_cleanup_still_runs_when_webview_fails(self) -> None:

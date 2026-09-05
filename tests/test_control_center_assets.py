@@ -64,3 +64,12 @@ class PerformanceWindowsContextAssetTest(unittest.TestCase):
         script = (WEB / "app.js").read_text(encoding="utf-8")
         for required in ("gaming_config", "startup_count", "disk_health"):
             self.assertIn(required, script)
+
+
+class PerformanceGuidanceAssetTest(unittest.TestCase):
+    def test_performance_section_offers_one_click_guidance_and_comparison(self) -> None:
+        script = (WEB / "app.js").read_text(encoding="utf-8")
+        self.assertIn("Optimize for current workload", script)
+        self.assertIn("recommendations", script)
+        self.assertIn("last_optimization", script)
+        self.assertIn("score_delta", script)

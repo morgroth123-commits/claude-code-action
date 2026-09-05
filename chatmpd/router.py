@@ -56,7 +56,8 @@ class RequestRouter:
 
         if any(token in lowered for token in (
             "performance", "bottleneck", "optimize my pc", "optimize this computer",
-            "optimize this pc", "gaming mode", "ai mode", "performance mode",
+            "optimize this pc", "optimize vader", "speed up vader", "tune vader",
+            "gaming mode", "ai mode", "performance mode",
             "fps stutter", "frame stutter",
         )):
             return RouteDecision("performance", False, "Performance analysis or optimization is requested.")

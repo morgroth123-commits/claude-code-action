@@ -50,9 +50,10 @@ def launch_webview(
         webview_module.create_window(
             "ChatMPD",
             service.url,
-            width=1320,
-            height=880,
-            min_size=(780, 620),
+            width=1180,
+            height=720,
+            min_size=(720, 520),
+            maximized=True,
             background_color="#212121",
         )
         webview_module.start(gui="edgechromium", debug=False)

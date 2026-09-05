@@ -37,6 +37,7 @@ class RequestRouterTest(unittest.TestCase):
             "Analyze my PC performance and find the bottleneck",
             "Optimize this computer for gaming performance",
             "Switch ChatMPD to AI performance mode",
+            "Optimize Vader for what I am doing right now",
         ):
             self.assertEqual(self.router.classify(prompt).capability, "performance")
 

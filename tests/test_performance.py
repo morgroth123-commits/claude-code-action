@@ -375,3 +375,54 @@ class PerformanceModeratePressureTest(unittest.TestCase):
                 PerformanceStore(database), evidence_probe=lambda: evidence
             ).analyze()
             self.assertEqual(report.bottleneck, "none")
+
+
+class PerformanceRecommendationTest(unittest.TestCase):
+    def test_report_explains_safe_actions_for_active_gaming_pressure(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            database = PlatformDatabase(Path(folder) / "platform.db")
+            evidence = PerformanceEvidence(
+                cpu_percent=86, memory_total_bytes=32*GIB, memory_available_bytes=5*GIB,
+                disk_total_bytes=500*GIB, disk_free_bytes=220*GIB,
+                gpu={"utilization_percent": 94, "vram_total_mib": 12288,
+                     "vram_used_mib": 11600},
+                processes=(ProcessPressure("browser", 9, 36, 5*GIB),),
+                power_plan_guid="balanced", power_plan_name="Balanced",
+                workloads=("eso",), commit_percent=88, pagefile_percent=20,
+                disk_active_percent=8, disk_queue_length=0,
+            )
+            report = PerformanceAnalyzer(
+                PerformanceStore(database), evidence_probe=lambda: evidence
+            ).analyze()
+            keys = {item.key for item in report.recommendations}
+            self.assertIn("profile", keys)
+            self.assertIn("memory", keys)
+            self.assertIn("vram", keys)
+            self.assertTrue(all("kill" not in item.detail.casefold()
+                                for item in report.recommendations))
+
+
+class PerformanceAutoOptimizeTest(unittest.TestCase):
+    def test_optimize_current_selects_gaming_ai_or_balanced_from_evidence(self) -> None:
+        class Analyzer:
+            def __init__(self, workloads):
+                self.workloads = workloads
+                self.store = type("Store", (), {"list": lambda self, limit=50: ()})()
+            def analyze(self):
+                return type("Report", (), {
+                    "report_id": "r", "overall_score": 70,
+                    "evidence": type("Evidence", (), {"workloads": self.workloads})(),
+                })()
+        class Optimizer:
+            def __init__(self): self.calls = []
+            def status(self): return {"active_mode": "balanced"}
+            def apply(self, mode, confirmed=False):
+                self.calls.append(mode)
+                return type("Result", (), {"mode": mode})()
+            def restore(self, confirmed=False): return None
+            def bind_runtime(self, callback): pass
+        for workloads, expected in [(("eso",), "gaming"), (("chatmpd",), "ai"), ((), "balanced")]:
+            optimizer = Optimizer()
+            center = PerformanceCenter(Analyzer(workloads), optimizer, workload_probe=lambda: False)
+            center.optimize_current()
+            self.assertEqual(optimizer.calls[-1], expected)

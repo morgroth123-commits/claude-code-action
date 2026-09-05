@@ -108,6 +108,9 @@ def performance_command_summary(center: Any, text: str) -> dict[str, Any]:
     if "balanced" in prompt:
         result = center.apply("balanced")
         return {"summary": result.message, "mode": result.mode, "changed": result.changed}
+    if any(token in prompt for token in ("optimize", "speed up", "tune")):
+        result = center.optimize_current()
+        return {"summary": result.message, "mode": result.mode, "changed": result.changed}
     report = center.analyze()
     findings = [getattr(item, "summary", str(item)) for item in getattr(report, "findings", ())]
     summary = f"Performance analysis: {report.overall_score}/100 overall; bottleneck {report.bottleneck}."
