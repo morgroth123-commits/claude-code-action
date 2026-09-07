@@ -289,3 +289,49 @@ class ConversationRecoveryProtocolTest(unittest.TestCase):
             )
             self.assertEqual(restarted.search("New chat"), ())
             self.assertFalse(attachment.path.exists())
+
+class ConversationRecoveryEdgeCaseTest(unittest.TestCase):
+    def test_invalid_pending_record_ids_are_cleared_without_blocking_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "conversations"
+            database = PlatformDatabase(base / "chatmpd.db")
+            with database.connect() as connection:
+                for namespace in ("conversation_sync", "conversation_delete"):
+                    for record_id in ("", "..", "bad/name"):
+                        connection.execute(
+                            "INSERT INTO platform_records(namespace, record_id, payload, updated_at) VALUES (?, ?, ?, ?)",
+                            (namespace, record_id, "{}", "2026-09-06T00:00:00+00:00"),
+                        )
+                connection.commit()
+
+            ConversationLibrary(root, database=database)
+
+            with database.connect() as connection:
+                remaining = connection.execute(
+                    "SELECT namespace, record_id FROM platform_records WHERE namespace IN (?, ?)",
+                    ("conversation_sync", "conversation_delete"),
+                ).fetchall()
+            self.assertEqual(remaining, [])
+
+    def test_save_snapshot_propagates_transient_read_oserror_without_overwrite(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "conversations"
+            library = ConversationLibrary(root)
+            document = library.create([
+                {"role": "user", "content": "Original request"},
+                {"role": "assistant", "content": "Original answer"},
+            ])
+            path = library._path(document.conversation_id)
+            before = path.read_text(encoding="utf-8")
+
+            with patch.object(library, "_read_path", side_effect=OSError("sharing violation")):
+                with self.assertRaisesRegex(OSError, "sharing violation"):
+                    library.save_snapshot(document.conversation_id, [
+                        {"role": "user", "content": "Replacement request"},
+                        {"role": "assistant", "content": "Replacement answer"},
+                    ])
+
+            self.assertEqual(path.read_text(encoding="utf-8"), before)

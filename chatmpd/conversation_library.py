@@ -157,7 +157,7 @@ class ConversationLibrary:
             now = _now()
             try:
                 current = self._read_path(path)
-            except (OSError, ValueError, json.JSONDecodeError):
+            except (FileNotFoundError, ValueError):
                 document = ConversationDocument(
                     cleaned_id, _title_from(cleaned), False, now, now, cleaned, None
                 )
@@ -390,7 +390,11 @@ class ConversationLibrary:
 
     def _reconcile_pending_syncs(self) -> None:
         for conversation_id, _payload in self._pending_records("conversation_sync"):
-            path = self._path(conversation_id)
+            try:
+                path = self._path(conversation_id)
+            except ValueError:
+                self._clear_pending("conversation_sync", conversation_id)
+                continue
             if not path.is_file():
                 self._clear_pending("conversation_sync", conversation_id)
                 continue
@@ -402,7 +406,11 @@ class ConversationLibrary:
 
     def _reconcile_pending_deletes(self) -> None:
         for conversation_id, payload in self._pending_records("conversation_delete"):
-            path = self._path(conversation_id)
+            try:
+                path = self._path(conversation_id)
+            except ValueError:
+                self._clear_pending("conversation_delete", conversation_id)
+                continue
             if path.is_file():
                 self._clear_pending("conversation_delete", conversation_id)
                 continue
