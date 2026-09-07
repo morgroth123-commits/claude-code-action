@@ -37,8 +37,12 @@ class OrchestratorTest(unittest.TestCase):
         self.assertEqual(chat.capability, "chat")
         self.assertEqual(chat.message, "answer:Explain recursion")
 
-        with self.assertRaisesRegex(ValueError, "project folder"):
-            orchestrator.command("Fix this code")
+        missing = orchestrator.command("Fix this code")
+        self.assertEqual(missing.capability, "coding")
+        self.assertEqual(missing.details["status"], "needs_context")
+        self.assertEqual(missing.details["needs_context"]["kind"], "workspace")
+        self.assertEqual(missing.details["suggested_action"], "choose_workspace")
+        self.assertIn("project folder", missing.message.casefold())
 
         coded = orchestrator.command("Fix this code", workspace="C:/project")
         self.assertEqual(coded.capability, "coding")
@@ -95,3 +99,58 @@ class OrchestratorToolEvidenceTest(unittest.TestCase):
         )
         result = ChatMPDOrchestrator(assistant=assistant).command("Use echo")
         self.assertEqual(result.details["tools_used"], ["ext_plugin_echo"])
+
+
+class AssistantFirstPlanningTest(unittest.TestCase):
+    def test_injected_planner_routes_semantic_coding_without_keyword_dependency(self) -> None:
+        from chatmpd.intent import IntentPlan
+
+        class Planner:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def plan(self, text, *, workspace=None, capabilities=()):
+                self.calls.append((text, workspace, tuple(capabilities)))
+                return IntentPlan(
+                    "coding", True, 0.96, "Project edit is requested."
+                )
+
+        assistant = _Assistant()
+        planner = Planner()
+        result = ChatMPDOrchestrator(
+            assistant=assistant, intent_planner=planner
+        ).command(
+            "Make the calculator stop returning the wrong total",
+            workspace="C:/project",
+        )
+        self.assertEqual(result.capability, "coding")
+        self.assertEqual(assistant.calls[0][0], "coding")
+        self.assertIn("coding", planner.calls[0][2])
+        self.assertIn("chat", planner.calls[0][2])
+
+    def test_malformed_planner_output_falls_back_to_deterministic_router(self) -> None:
+        from chatmpd.intent import IntentPlanner
+
+        class Provider:
+            def chat(self, messages):
+                return SimpleNamespace(text="not-json")
+
+        assistant = _Assistant()
+        result = ChatMPDOrchestrator(
+            assistant=assistant, intent_planner=IntentPlanner(complete=lambda messages: Provider().chat(messages).text)
+        ).command("Explain recursion")
+        self.assertEqual(result.capability, "chat")
+        self.assertEqual(assistant.calls[0], ("chat", "Explain recursion"))
+
+    def test_low_confidence_plan_falls_back_to_router(self) -> None:
+        from chatmpd.intent import IntentPlan
+
+        class Planner:
+            def plan(self, text, *, workspace=None, capabilities=()):
+                return IntentPlan("coding", True, 0.1, "Weak guess")
+
+        assistant = _Assistant()
+        result = ChatMPDOrchestrator(
+            assistant=assistant, intent_planner=Planner()
+        ).command("Explain photosynthesis simply")
+        self.assertEqual(result.capability, "chat")

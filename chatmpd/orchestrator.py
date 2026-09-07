@@ -10,7 +10,7 @@ from threading import RLock
 from typing import Any, Callable, Mapping
 
 from .assistant import DesktopAssistant
-from .router import RequestRouter
+from .router import RequestRouter, RouteDecision
 
 
 SpecialistHandler = Callable[[str], Any]
@@ -54,11 +54,15 @@ class ChatMPDOrchestrator:
         router: RequestRouter | None = None,
         specialist_handlers: Mapping[str, SpecialistHandler] | None = None,
         platform_services: Any | None = None,
+        intent_planner: Any | None = None,
+        confidence_threshold: float = 0.55,
     ) -> None:
         self.assistant = assistant
         self.router = router or RequestRouter()
         self.specialist_handlers = dict(specialist_handlers or {})
         self.platform_services = platform_services
+        self.intent_planner = intent_planner
+        self.confidence_threshold = float(confidence_threshold)
         self._closed = False
         self._lock = RLock()
 
@@ -75,19 +79,34 @@ class ChatMPDOrchestrator:
             capture = getattr(self.platform_services, "capture_explicit_memory", None)
             if callable(capture):
                 capture(text)
-        decision = self.router.classify(text)
+        decision = self._decide_route(text, workspace)
         if decision.capability == "chat":
             turn = self.assistant.chat(text)
             tools_used = [str(item) for item in getattr(turn, "tools_used", ())]
             details = {"tools_used": tools_used} if tools_used else {}
+            details.setdefault("status", "completed")
+            details.setdefault("status_label", "Finishing up")
             return CommandResult("chat", str(turn.assistant), details)
         if decision.capability == "coding":
             if workspace is None or not str(workspace).strip():
-                raise ValueError("This coding request needs a project folder.")
+                return CommandResult(
+                    "coding",
+                    "Choose a project folder so ChatMPD can edit and verify the code safely.",
+                    {
+                        "status": "needs_context",
+                        "status_label": "Checking project",
+                        "needs_context": {
+                            "kind": "workspace",
+                            "message": "A project folder is required for coding work.",
+                        },
+                        "suggested_action": "choose_workspace",
+                    },
+                )
             outcome = self.assistant.run_task(Path(workspace), text)
             result = outcome.result
             details = {
                 "status": result.status,
+                "status_label": "Verifying changes",
                 "changed_files": list(result.changed_files),
                 "checks": [
                     {"argv": list(check.argv), "exit_code": check.exit_code}
@@ -107,6 +126,34 @@ class ChatMPDOrchestrator:
         if callable(release):
             release()
         return self._normalize(decision.capability, handler(text))
+
+    def _decide_route(
+        self, text: str, workspace: str | Path | None
+    ) -> RouteDecision:
+        if self.intent_planner is not None:
+            try:
+                plan = self.intent_planner.plan(
+                    text,
+                    workspace=None if workspace is None else str(workspace),
+                    capabilities=self._planner_capabilities(),
+                )
+                confidence = float(getattr(plan, "confidence", 0.0))
+                if confidence < self.confidence_threshold:
+                    raise ValueError("planner confidence below threshold")
+                if hasattr(plan, "to_route_decision"):
+                    return plan.to_route_decision()
+                return RouteDecision(
+                    capability=str(getattr(plan, "capability")),
+                    requires_workspace=bool(getattr(plan, "requires_workspace", False)),
+                    reason=str(getattr(plan, "reason", "")),
+                )
+            except Exception:
+                pass
+        return self.router.classify(text)
+
+    def _planner_capabilities(self) -> tuple[str, ...]:
+        routes = ["chat", "coding", *self.specialist_handlers.keys()]
+        return tuple(dict.fromkeys(str(item) for item in routes if str(item).strip()))
 
     def close(self) -> None:
         with self._lock:
@@ -130,9 +177,20 @@ class ChatMPDOrchestrator:
                 or details.get("status")
                 or json.dumps(_jsonable(details), ensure_ascii=False)
             )
+            details.setdefault("status", str(details.get("status") or "completed"))
+            if capability == "media":
+                details.setdefault("status_label", "Creating media")
+            else:
+                details.setdefault("status_label", "Working locally")
             return CommandResult(capability, message, details)
         if dataclasses.is_dataclass(value) and not isinstance(value, type):
             details = dataclasses.asdict(value)
             message = str(details.get("summary") or details.get("status") or capability)
+            details.setdefault("status", "completed")
+            details.setdefault("status_label", "Working locally")
             return CommandResult(capability, message, details)
-        return CommandResult(capability, str(value), {})
+        return CommandResult(
+            capability,
+            str(value),
+            {"status": "completed", "status_label": "Working locally"},
+        )
