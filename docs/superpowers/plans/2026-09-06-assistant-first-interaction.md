@@ -9,6 +9,7 @@
 **Tech Stack:** Python 3.14, existing local model provider/runtime, standard-library HTTP service, SQLite-backed platform services, HTML/CSS/vanilla JavaScript, pywebview/WebView2, unittest, PyInstaller.
 
 **Spec:** `docs/superpowers/specs/2026-09-06-assistant-first-interaction-design.md`
+**Database dependency spec:** `docs/superpowers/specs/2026-09-06-database-implications-assistant-first.md`
 
 ## Global Constraints
 
@@ -26,6 +27,30 @@
 
 ---
 
+### Task 0: Database foundation required by assistant-first UI
+
+**Files:**
+- Modify: `chatmpd/platform_db.py`
+- Modify: `chatmpd/conversation_library.py`
+- Modify: `chatmpd/assistant.py`
+- Modify: `chatmpd/webview_host.py`
+- Modify: `chatmpd/attachments.py` as needed for conversation lifecycle cleanup
+- Test: conversation/database/attachment integration tests
+
+**Interfaces:**
+- SQLite-backed conversation metadata/FTS becomes the sidebar/search projection while JSON remains the authoritative transcript body.
+- `ConversationLibrary.list()` and `search()` stop scanning every transcript.
+- Both `ConversationLibrary` and `ConversationStore` writes keep SQLite metadata synchronized.
+- Workspace remains per-conversation and is mirrored in `conversations.workspace` plus JSON.
+- Priority-1 DB indexes and transient lock handling land before IntentPlanner/sidebar work.
+
+- [ ] **Step 1: Read the database dependency spec and performance review; write failing schema, backfill, synchronization, pagination/search, lock-retry, and attachment-cleanup tests.**
+- [ ] **Step 2: Run the focused tests and verify RED.**
+- [ ] **Step 3: Implement the Priority-1 indexes, one-time WAL setup/per-connection busy handling, SQLite conversation metadata + FTS, idempotent legacy JSON backfill, synchronized write paths, and conversation attachment cleanup.**
+- [ ] **Step 4: Run focused GREEN tests plus `git diff --check`.**
+- [ ] **Step 5: Commit as an independently reviewable DB foundation before Task 1.**
+
+---
 ### Task 1: Add schema-validated intent planning with deterministic fallback
 
 **Files:**
