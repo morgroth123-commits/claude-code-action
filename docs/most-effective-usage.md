@@ -1,14 +1,15 @@
 # Most Effective Use of ChatMPD
 
-ChatMPD is a local-first general assistant, not a coding-only task runner. The normal interface is the modern `ChatMPD.exe` conversation window. Ask in ordinary language; the router chooses reasoning, verified coding, system/ESO/Vortex specialists, media, skills, plugins, or external tools underneath one conversation.
+ChatMPD is a local-first general assistant, not a coding-only task runner. The normal interface is the modern `ChatMPD.exe` conversation window. Ask in ordinary language; ChatMPD plans the intent and selects reasoning, verified coding, system/ESO/Vortex specialists, media, skills, plugins, or external tools underneath one conversation. A deterministic router remains the fallback when planning is uncertain or unavailable.
 
 ## Start here
 
 1. Open ChatMPD from the desktop shortcut.
 2. Ask what you want in normal language.
-3. Choose a project folder only for coding/project work.
-4. Use the sidebar for persistent conversation history; **New chat does not delete old chats**.
-5. Open **Control Center** for Memory, Knowledge, Skills & Tools, Models, Workflows, Automations, Recovery, Prompt Guide, Diagnostics, and Sharing.
+3. Attach files with the **+** button or drag them into the composer when they help.
+4. For coding/project work, ask normally; if a project folder is required, use the inline **Choose project** action.
+5. Use the sidebar for persistent conversation history; **New chat does not delete old chats**.
+6. Open **Settings** for everyday controls. Technical surfaces such as Knowledge, Skills & Tools, Models, Performance, Workflows, Automations, Prompt Guide, Diagnostics, and Sharing are grouped under **Advanced**.
 
 All default inference remains local. ChatMPD itself has no per-token charge, subscription, artificial daily quota, or mandatory paid API. Hardware/model context limits still exist, and long conversations use persisted history plus retrieval rather than product metering.
 

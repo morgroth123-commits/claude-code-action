@@ -14,6 +14,8 @@ Mobile thin client┘                         |
                                              +-> PlatformServices -> memory/knowledge/extensions/workflows/etc.
 ```
 
+`IntentPlanner` receives only a bounded, secret-free capability catalog and reuses the existing reasoning runtime. Planner output is schema-validated against registered top-level routes; malformed, low-confidence, or unavailable planning falls back to `RequestRouter`. Missing project context becomes a structured `needs_context` result instead of an arbitrary workspace choice.
+
 `PlatformServices` owns the cross-cutting local platform: SQLite/FTS persistence, durable memory, knowledge indexing, attachments, capability registry, extensions, model lab, permissions, secrets, recovery, workflows, automations, activity evidence, prompts/packs, diagnostics, LM Studio/Bionic discovery, mod sources, voice/vision, and sanitized export.
 
 ## Persistence and retrieval
@@ -54,7 +56,7 @@ Media uses hidden loopback ComfyUI plus Z-Image/LTX workflows and FFmpeg. GPU me
 
 ## UI, mobile, and sharing
 
-The desktop shell is HTML/CSS/JS rendered in a native Edge WebView2 window. The main view stays conversation-first; Control Center surfaces platform management without exposing backend node graphs or raw model flags. Desktop APIs bind to loopback only.
+The desktop shell is HTML/CSS/JS rendered in a native Edge WebView2 window. The main view stays conversation-first. Settings keeps everyday controls visible and moves technical platform surfaces under Advanced. The composer supports managed attachments, drag/drop, guided project selection, inline confirmation/recovery actions, and evidence-based status labels without exposing backend node graphs, raw model flags, or hidden reasoning. Desktop APIs bind to loopback only.
 
 The mobile gateway serves the same frontend over a private network. Pairing uses a short-lived one-time code; only a token digest persists on Vader. Raw llama.cpp/LM Studio/ComfyUI endpoints are never exposed by the mobile gateway.
 

@@ -1,6 +1,6 @@
-# ChatMPD 0.3.5
+# ChatMPD 0.3.6
 
-ChatMPD is a local-first autonomous Windows assistant with a modern WebView2 conversation UI, persistent chats and memory, extensible skills/plugins/tools, local model routing, verified coding, ESO/Vortex specialists, local media, mobile access, workflows/automation, and sanitized sharing.
+ChatMPD is a local-first autonomous Windows assistant with an assistant-first WebView2 conversation UI, persistent chats and memory, extensible skills/plugins/tools, local intent planning, verified coding, ESO/Vortex specialists, local media, mobile access, workflows/automation, and sanitized sharing.
 
 The normal interface is `ChatMPD.exe`. Desktop and phone use the same orchestrator and local data. Default inference stays on the owner's machine and ChatMPD itself has no subscription, per-token billing, artificial usage quota, or mandatory paid API.
 
@@ -8,7 +8,7 @@ The normal interface is `ChatMPD.exe`. Desktop and phone use the same orchestrat
 
 - Persistent conversation history; New Chat never erases earlier chats.
 - Durable cross-chat memory plus local document/knowledge retrieval.
-- Control Center for Memory, Knowledge, Skills & Tools, Models, Workflows, Automations, Recovery, Prompt Guide, Diagnostics, and Sharing.
+- Conversation-first Settings for Memory and Recovery, with Knowledge, Skills & Tools, Models, Performance, Workflows, Automations, Prompt Guide, Diagnostics, and Sharing under Advanced.
 - Skills from TOML + Markdown; bounded subprocess plugins; CLI, HTTP, MCP stdio, and remote Streamable HTTP MCP adapters.
 - Capability packs and an extension wizard.
 - Hardware-aware local model inventory, benchmarks, and role overrides.
@@ -37,6 +37,10 @@ The normal interface is `ChatMPD.exe`. Desktop and phone use the same orchestrat
 Compatible GGUF models are discovered rather than permanently hard-coded. The runtime keeps at most one role-selected llama.cpp model active. LM Studio is supported as an additional localhost OpenAI-compatible runtime/management surface; Bionic's bundled LM Studio runtime can be detected when present. Optional cloud/credit features are never enabled silently.
 
 ## One front door
+
+Ask in ordinary language. ChatMPD uses a bounded IntentPlanner to choose the appropriate local capability automatically, with the deterministic router retained as a safe fallback. You do not need command syntax, model names, or capability names for normal use.
+
+Attach files with the + button or drag them into the composer. For project edits, ChatMPD asks you to choose a project folder only when one is actually needed, then can retry the original request with that context.
 
 Examples:
 
