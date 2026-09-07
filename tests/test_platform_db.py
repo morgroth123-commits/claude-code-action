@@ -37,10 +37,6 @@ class PlatformDatabaseSchemaTest(unittest.TestCase):
             self.assertIn("conversations_fts", tables)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class _FakeConnection:
     def __init__(self) -> None:
         self.row_factory = None
@@ -132,3 +128,6 @@ class PlatformDatabaseOperationRetryTest(unittest.TestCase):
 
         self.assertEqual(fake.update_attempts, 2)
         sleeper.assert_called_once()
+
+if __name__ == "__main__":
+    unittest.main()

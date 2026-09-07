@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
@@ -44,43 +42,11 @@ class ConversationStore:
 
     def __init__(self, root: Path | None = None) -> None:
         self.root = Path(root or _default_conversation_dir())
+        self._library = ConversationLibrary(self.root)
 
     def save(self, conversation_id: str, messages: list[dict[str, str]]) -> Path:
-        self.root.mkdir(parents=True, exist_ok=True)
-        destination = self.root / f"{conversation_id}.json"
-        now = datetime.now(UTC).isoformat()
-        existing: dict[str, Any] = {}
-        if destination.is_file():
-            try:
-                loaded = json.loads(destination.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    existing = loaded
-            except (OSError, json.JSONDecodeError):
-                existing = {}
-        title = str(existing.get("title") or "").strip()
-        if not title:
-            title = next((" ".join(item.get("content", "").split())[:64] for item in messages if item.get("role") == "user" and item.get("content", "").strip()), "New chat")
-        payload = {
-            "schema_version": 2,
-            "conversation_id": conversation_id,
-            "title": title,
-            "pinned": bool(existing.get("pinned", False)),
-            "created_at": str(existing.get("created_at") or existing.get("updated_at") or now),
-            "updated_at": now,
-            "messages": messages,
-            "workspace": existing.get("workspace"),
-        }
-        with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", dir=self.root, delete=False
-        ) as stream:
-            json.dump(payload, stream, indent=2, ensure_ascii=False)
-            temporary = Path(stream.name)
-        try:
-            os.replace(temporary, destination)
-        finally:
-            temporary.unlink(missing_ok=True)
-        ConversationLibrary(self.root).sync(conversation_id)
-        return destination
+        document = self._library.save_snapshot(conversation_id, messages)
+        return self.root / f"{document.conversation_id}.json"
 
 
 class DesktopAssistant:

@@ -176,3 +176,116 @@ class ConversationMetadataDatabaseTest(unittest.TestCase):
             matches = library.search("continued")
 
             self.assertEqual(matches[0].conversation_id, document.conversation_id)
+
+
+class ConversationRecoveryProtocolTest(unittest.TestCase):
+    def test_failed_projection_sync_is_reconciled_from_committed_json_on_restart(self) -> None:
+        import sqlite3
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "conversations"
+            database = PlatformDatabase(Path(directory) / "chatmpd.db")
+            library = ConversationLibrary(root, database=database)
+            document = library.create([
+                {"role": "user", "content": "Initial request"},
+                {"role": "assistant", "content": "Initial answer"},
+            ])
+            updated_messages = [
+                {"role": "user", "content": "Store the durable repair token"},
+                {"role": "assistant", "content": "projection-repair-token"},
+            ]
+
+            with patch.object(
+                library, "_upsert_metadata",
+                side_effect=sqlite3.OperationalError("database is locked"),
+            ):
+                with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+                    library.save_messages(document.conversation_id, updated_messages)
+
+            committed = json.loads(
+                library._path(document.conversation_id).read_text(encoding="utf-8")
+            )
+            self.assertEqual(committed["messages"][-1]["content"], "projection-repair-token")
+
+            restarted = ConversationLibrary(root, database=database)
+            matches = restarted.search("projection-repair-token")
+            self.assertEqual(matches[0].conversation_id, document.conversation_id)
+
+    def test_conversation_store_save_uses_the_same_recoverable_projection_protocol(self) -> None:
+        import sqlite3
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "conversations"
+            library = ConversationLibrary(root)
+            document = library.create([
+                {"role": "user", "content": "Initial request"},
+                {"role": "assistant", "content": "Initial answer"},
+            ])
+            store = ConversationStore(root)
+            original = ConversationLibrary._upsert_metadata
+            failed = False
+
+            def fail_once(instance, candidate):
+                nonlocal failed
+                if not failed and any(
+                    item.get("content") == "store-repair-token" for item in candidate.messages
+                ):
+                    failed = True
+                    raise sqlite3.OperationalError("database is locked")
+                return original(instance, candidate)
+            with patch.object(ConversationLibrary, "_upsert_metadata", new=fail_once):
+                with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+                    store.save(document.conversation_id, [
+                        {"role": "user", "content": "Continue"},
+                        {"role": "assistant", "content": "store-repair-token"},
+                    ])
+
+            restarted = ConversationLibrary(root)
+            matches = restarted.search("store-repair-token")
+            self.assertEqual(matches[0].conversation_id, document.conversation_id)
+
+    def test_delete_recovers_if_projection_cleanup_fails_after_json_is_removed(self) -> None:
+        import sqlite3
+        from contextlib import contextmanager
+        from unittest.mock import patch
+
+        from chatmpd.attachments import AttachmentStore
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "conversations"
+            database = PlatformDatabase(base / "chatmpd.db")
+            library = ConversationLibrary(root, database=database)
+            document = library.create()
+            attachment = AttachmentStore(database, base / "attachments").import_bytes(
+                b"temporary", original_name="note.txt",
+                conversation_id=document.conversation_id,
+            )
+            original_connect = database.connect
+            calls = 0
+
+            @contextmanager
+            def fail_second_connect():
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise sqlite3.OperationalError("database is locked")
+                with original_connect() as connection:
+                    yield connection
+
+            with patch.object(database, "connect", new=fail_second_connect):
+                with self.assertRaisesRegex(sqlite3.OperationalError, "locked"):
+                    library.delete(document.conversation_id)
+
+            self.assertFalse(library._path(document.conversation_id).exists())
+            self.assertTrue(attachment.path.exists())
+
+            restarted = ConversationLibrary(root, database=database)
+            self.assertNotIn(
+                document.conversation_id,
+                {item.conversation_id for item in restarted.list()},
+            )
+            self.assertEqual(restarted.search("New chat"), ())
+            self.assertFalse(attachment.path.exists())

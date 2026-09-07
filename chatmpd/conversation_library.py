@@ -94,6 +94,8 @@ class ConversationLibrary:
             self.database = PlatformDatabase()
         else:
             self.database = PlatformDatabase(self.root / ".chatmpd-metadata.sqlite")
+        self._reconcile_pending_deletes()
+        self._reconcile_pending_syncs()
         self._backfill_once()
 
     def create(self, messages: list[dict[str, str]] | None = None) -> ConversationDocument:
@@ -142,6 +144,32 @@ class ConversationLibrary:
             )
             self._write(updated)
             return updated
+
+    def save_snapshot(
+        self, conversation_id: str, messages: list[dict[str, str]]
+    ) -> ConversationDocument:
+        """Persist a full transcript through the same recoverable projection path."""
+
+        with self._lock:
+            cleaned_id = str(conversation_id).strip()
+            path = self._path(cleaned_id)
+            cleaned = _clean_messages(messages)
+            now = _now()
+            try:
+                current = self._read_path(path)
+            except (OSError, ValueError, json.JSONDecodeError):
+                document = ConversationDocument(
+                    cleaned_id, _title_from(cleaned), False, now, now, cleaned, None
+                )
+            else:
+                title = current.title
+                if title == "New chat" and cleaned:
+                    title = _title_from(cleaned)
+                document = self._replace(
+                    current, title=title, messages=cleaned, updated_at=now
+                )
+            self._write(document)
+            return document
 
     def rename(self, conversation_id: str, title: str) -> ConversationDocument:
         cleaned = " ".join(str(title).split()).strip()
@@ -214,36 +242,16 @@ class ConversationLibrary:
     def delete(self, conversation_id: str) -> bool:
         with self._lock:
             path = self._path(conversation_id)
+            if not path.is_file():
+                return False
+            attachment_paths = self._mark_delete_pending(conversation_id)
             try:
                 path.unlink()
             except FileNotFoundError:
-                return False
-            with self.database.connect() as connection:
-                attachment_rows = connection.execute(
-                    "SELECT stored_path FROM attachments WHERE conversation_id=?",
-                    (conversation_id,),
-                ).fetchall()
-                connection.execute(
-                    "DELETE FROM attachments WHERE conversation_id=?",
-                    (conversation_id,),
-                )
-                connection.execute(
-                    "DELETE FROM conversations_fts WHERE conversation_id=?",
-                    (conversation_id,),
-                )
-                connection.execute(
-                    "DELETE FROM conversations WHERE conversation_id=?",
-                    (conversation_id,),
-                )
-                connection.commit()
-            for row in attachment_rows:
-                try:
-                    attachment_path = Path(str(row["stored_path"]))
-                    attachment_path.unlink(missing_ok=True)
-                    if attachment_path.parent.is_dir() and not any(attachment_path.parent.iterdir()):
-                        attachment_path.parent.rmdir()
-                except OSError:
-                    continue
+                pass
+            self._delete_projection(conversation_id)
+            if self._cleanup_attachment_paths(attachment_paths):
+                self._clear_pending("conversation_delete", conversation_id)
             return True
 
     def _path(self, conversation_id: str) -> Path:
@@ -315,11 +323,127 @@ class ConversationLibrary:
             json.dump(payload, stream, indent=2, ensure_ascii=False)
             temporary = Path(stream.name)
         try:
+            self._mark_sync_pending(document.conversation_id)
             os.replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)
         self._upsert_metadata(document)
         return destination
+
+    def _mark_sync_pending(self, conversation_id: str) -> None:
+        self._set_pending("conversation_sync", conversation_id, "{}")
+
+    def _mark_delete_pending(self, conversation_id: str) -> tuple[Path, ...]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT stored_path FROM attachments WHERE conversation_id=?",
+                (conversation_id,),
+            ).fetchall()
+            paths = tuple(Path(str(row["stored_path"])) for row in rows)
+            payload = json.dumps(
+                {"attachment_paths": [str(item) for item in paths]},
+                ensure_ascii=False,
+            )
+            connection.execute(
+                """
+                INSERT INTO platform_records(namespace, record_id, payload, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(namespace, record_id) DO UPDATE SET
+                    payload=excluded.payload, updated_at=excluded.updated_at
+                """,
+                ("conversation_delete", conversation_id, payload, _now()),
+            )
+            connection.commit()
+        return paths
+
+    def _set_pending(self, namespace: str, conversation_id: str, payload: str) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO platform_records(namespace, record_id, payload, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(namespace, record_id) DO UPDATE SET
+                    payload=excluded.payload, updated_at=excluded.updated_at
+                """,
+                (namespace, conversation_id, payload, _now()),
+            )
+            connection.commit()
+
+    def _clear_pending(self, namespace: str, conversation_id: str) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                "DELETE FROM platform_records WHERE namespace=? AND record_id=?",
+                (namespace, conversation_id),
+            )
+            connection.commit()
+
+    def _pending_records(self, namespace: str) -> tuple[tuple[str, str], ...]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT record_id, payload FROM platform_records
+                WHERE namespace=? ORDER BY updated_at
+                """,
+                (namespace,),
+            ).fetchall()
+        return tuple((str(row["record_id"]), str(row["payload"])) for row in rows)
+
+    def _reconcile_pending_syncs(self) -> None:
+        for conversation_id, _payload in self._pending_records("conversation_sync"):
+            path = self._path(conversation_id)
+            if not path.is_file():
+                self._clear_pending("conversation_sync", conversation_id)
+                continue
+            try:
+                document = self._read_path(path)
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            self._upsert_metadata(document)
+
+    def _reconcile_pending_deletes(self) -> None:
+        for conversation_id, payload in self._pending_records("conversation_delete"):
+            path = self._path(conversation_id)
+            if path.is_file():
+                self._clear_pending("conversation_delete", conversation_id)
+                continue
+            try:
+                data = json.loads(payload)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                data = {}
+            raw_paths = data.get("attachment_paths", []) if isinstance(data, dict) else []
+            attachment_paths = tuple(Path(str(item)) for item in raw_paths if str(item).strip())
+            self._delete_projection(conversation_id)
+            if self._cleanup_attachment_paths(attachment_paths):
+                self._clear_pending("conversation_delete", conversation_id)
+
+    def _delete_projection(self, conversation_id: str) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                "DELETE FROM attachments WHERE conversation_id=?",
+                (conversation_id,),
+            )
+            connection.execute(
+                "DELETE FROM conversations_fts WHERE conversation_id=?",
+                (conversation_id,),
+            )
+            connection.execute(
+                "DELETE FROM conversations WHERE conversation_id=?",
+                (conversation_id,),
+            )
+            connection.commit()
+
+    @staticmethod
+    def _cleanup_attachment_paths(paths: tuple[Path, ...]) -> bool:
+        complete = True
+        for attachment_path in paths:
+            try:
+                attachment_path.unlink(missing_ok=True)
+                parent = attachment_path.parent
+                if parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+            except OSError:
+                complete = False
+        return complete
 
     def _backfill_once(self) -> None:
         marker = "conversation_json_backfill_v1"
@@ -378,6 +502,10 @@ class ConversationLibrary:
                 VALUES (?, ?, ?, ?)
                 """,
                 (summary.conversation_id, summary.title, summary.preview, message_text),
+            )
+            connection.execute(
+                "DELETE FROM platform_records WHERE namespace=? AND record_id=?",
+                ("conversation_sync", summary.conversation_id),
             )
             connection.commit()
 
