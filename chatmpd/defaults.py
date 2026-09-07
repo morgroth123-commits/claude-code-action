@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from .app import build_shared_intent_planner
 from .assistant import DesktopAssistant
 from .comfyui import ComfyUIBackend, ComfyUIClient
 from .eso import EsoAddonManager
@@ -264,12 +265,18 @@ def build_default_orchestrator(*, start_automation_scheduler: bool = True) -> Ch
     manager = ModelRuntimeManager(
         registry, runtime_factory=_runtime_for_model, selector=services.models.choose
     )
+    provider_factory = lambda endpoint: LlamaCppProvider(endpoint, timeout=300)
     assistant = DesktopAssistant(
         model_manager=manager,
-        provider_factory=lambda endpoint: LlamaCppProvider(endpoint, timeout=300),
+        provider_factory=provider_factory,
         context_provider=services.retrieval_context,
         tool_provider=services.assistant_tools.tools_for_prompt,
         tool_runner=services.assistant_tools.invoke,
+    )
+    intent_planner = build_shared_intent_planner(
+        manager,
+        provider_factory=provider_factory,
+        capability_context=services.planner_capability_context(),
     )
     media = DefaultMediaSpecialist()
     services.performance.bind_runtime(assistant.release_runtime)
@@ -296,6 +303,7 @@ def build_default_orchestrator(*, start_automation_scheduler: bool = True) -> Ch
             "media": media,
         },
         platform_services=services,
+        intent_planner=intent_planner,
     )
 
     def automation_runner(command: str) -> str:

@@ -136,3 +136,58 @@ class ApplicationDispatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class AssistantFirstPlannerWiringTest(unittest.TestCase):
+    def test_shared_planner_uses_existing_reasoning_manager_and_bounded_context(self) -> None:
+        from chatmpd.app import build_shared_intent_planner
+        from chatmpd.model_registry import ModelRole
+
+        class Manager:
+            endpoint = "http://127.0.0.1:9090"
+            def __init__(self): self.calls = []
+            def activate(self, role):
+                self.calls.append(role)
+                return SimpleNamespace(endpoint=self.endpoint)
+        class Provider:
+            def __init__(self): self.messages = []
+            def chat(self, messages):
+                self.messages = messages
+                return SimpleNamespace(text='{"capability":"chat","requires_workspace":false,"confidence":0.9,"reason":"General answer","missing_context":null,"suggested_action":null}')
+
+        manager = Manager()
+        provider = Provider()
+        planner = build_shared_intent_planner(
+            manager,
+            provider_factory=lambda endpoint: provider,
+            capability_context="Ready extension: Local helper",
+        )
+        plan = planner.plan("Explain this simply")
+        self.assertEqual(plan.capability, "chat")
+        self.assertEqual(manager.calls, [ModelRole.REASONING])
+        self.assertIn("Ready extension: Local helper", provider.messages[0]["content"])
+        self.assertLessEqual(len(provider.messages[0]["content"]), 12000)
+
+    def test_default_builder_attaches_shared_intent_planner(self) -> None:
+        import inspect
+        from chatmpd.defaults import build_default_orchestrator
+        source = inspect.getsource(build_default_orchestrator)
+        self.assertIn("build_shared_intent_planner", source)
+        self.assertIn("intent_planner=intent_planner", source)
+
+class PlannerCapabilityContextTest(unittest.TestCase):
+    def test_context_exposes_routes_and_ready_extensions_without_metadata(self) -> None:
+        from chatmpd.capabilities import CapabilityDescriptor, CapabilityRegistry
+        from chatmpd.platform_services import PlatformServices
+        registry = CapabilityRegistry()
+        for capability_id in ("chat", "coding", "system", "performance", "eso", "vortex", "media"):
+            registry.register(CapabilityDescriptor(capability_id, capability_id.title(), f"{capability_id} route"))
+        registry.register(CapabilityDescriptor("helper_ext", "Friendly helper", "Useful extension", kind="extension", metadata={"token":"DO_NOT_LEAK"}))
+        registry.register(CapabilityDescriptor("broken_ext", "Broken helper", "Unavailable", kind="extension", health="unavailable"))
+        services = PlatformServices.__new__(PlatformServices)
+        services.capabilities = registry
+        context = services.planner_capability_context()
+        for capability_id in ("chat", "coding", "system", "performance", "eso", "vortex", "media"):
+            self.assertIn(capability_id, context)
+        self.assertIn("Friendly helper", context)
+        self.assertNotIn("Broken helper", context)
+        self.assertNotIn("DO_NOT_LEAK", context)

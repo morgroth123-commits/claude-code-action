@@ -63,3 +63,11 @@ class PromptIntegrationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class AssistantFirstPromptIntegrationTest(unittest.TestCase):
+    def test_general_prompt_says_ordinary_language_is_enough_and_selection_is_automatic(self) -> None:
+        from chatmpd.doctrine import general_assistant_prompt
+        prompt = general_assistant_prompt().casefold()
+        self.assertIn("ordinary language", prompt)
+        self.assertIn("automatically", prompt)
+        self.assertIn("tools", prompt)

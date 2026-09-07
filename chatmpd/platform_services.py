@@ -100,6 +100,29 @@ class PlatformServices:
             self.automation_scheduler.stop()
             self.automation_scheduler = None
 
+    def planner_capability_context(self, *, max_extensions: int = 24) -> str:
+        """Return a bounded, secret-free catalog for assistant-first intent planning."""
+
+        route_ids = ("chat", "coding", "system", "performance", "eso", "vortex", "media")
+        lines = ["Top-level routes:"]
+        for capability_id in route_ids:
+            try:
+                item = self.capabilities.get(capability_id)
+            except KeyError:
+                continue
+            if not item.enabled or item.health != "ready":
+                continue
+            lines.append(f"- {capability_id}: {item.title} ? {item.description}"[:600])
+        extensions = [
+            item for item in self.capabilities.list(enabled_only=True)
+            if item.kind != "builtin" and item.health == "ready"
+        ][: max(0, min(int(max_extensions), 64))]
+        if extensions:
+            lines.append("Ready extensions available through normal chat/tool use:")
+            for item in extensions:
+                lines.append(f"- {item.title}: {item.description}"[:600])
+        return "\n".join(lines)[:6_000]
+
     def retrieval_context(self, prompt: str, *, max_items: int = 8) -> str:
         terms = []
         for term in re.findall(r"[\w-]{4,}", str(prompt), flags=re.UNICODE):

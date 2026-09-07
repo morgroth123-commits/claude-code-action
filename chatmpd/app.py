@@ -28,6 +28,34 @@ def run_local_task(
         )
 
 
+def build_shared_intent_planner(
+    model_manager: Any,
+    *,
+    provider_factory: Callable[[str], Any],
+    capability_context: str = "",
+    capabilities: Sequence[str] | None = None,
+) -> Any:
+    """Create an intent planner that reuses ChatMPD's existing reasoning runtime."""
+
+    from .intent import DEFAULT_CAPABILITIES, IntentPlanner
+    from .model_registry import ModelRole
+
+    catalog = tuple(capabilities or DEFAULT_CAPABILITIES)
+    bounded_context = str(capability_context or "").strip()[:6_000]
+
+    def complete(messages: list[dict[str, str]]) -> str:
+        runtime = model_manager.activate(ModelRole.REASONING)
+        endpoint = str(getattr(runtime, "endpoint", model_manager.endpoint))
+        prepared = [dict(message) for message in messages]
+        if prepared and bounded_context:
+            system = str(prepared[0].get("content", ""))
+            prepared[0]["content"] = (
+                system + "\n\nAVAILABLE LOCAL CAPABILITY CONTEXT\n" + bounded_context
+            )[:12_000]
+        response = provider_factory(endpoint).chat(prepared)
+        return str(getattr(response, "text", ""))
+
+    return IntentPlanner(complete=complete, capabilities=catalog)
 def dispatch(
     arguments: Sequence[str],
     *,

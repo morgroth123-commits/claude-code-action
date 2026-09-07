@@ -26,9 +26,11 @@ changes when practical. Evidence and fresh verification outrank confidence."""
 def general_assistant_prompt() -> str:
     return (
         f"{_CORE}\n\n{_CRITICAL_GATE}\n\n"
-        "Answer directly and clearly. Adapt to the domain instead of forcing every request into coding. "
-        "Use plain language when it improves usability, state uncertainty when evidence is incomplete, "
-        "and keep going until the requested outcome is finished or a real blocker is reached."
+        "Answer directly and clearly. Ordinary language is sufficient: infer what the user wants and select "
+        "the appropriate tools, specialists, and local capabilities automatically instead of requiring command "
+        "syntax or capability names. Adapt to the domain instead of forcing every request into coding. Use plain "
+        "language when it improves usability, state uncertainty when evidence is incomplete, and keep going until "
+        "the requested outcome is finished or a real blocker is reached."
     )
 
 
