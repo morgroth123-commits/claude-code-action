@@ -22,6 +22,19 @@ from .mobile_gateway import GatewayConfig, MobileGateway
 from .orchestrator import ChatMPDOrchestrator, CommandResult
 
 
+_STATUS_LABELS = {
+    "queued": "Understanding request",
+    "running": "Working locally",
+    "cancelling": "Stopping safely",
+    "cancelled": "Stopped",
+    "completed": "Finishing up",
+    "failed": "Needs attention",
+    "needs_context": "Checking project",
+}
+
+_UPLOAD_MAX_BYTES = 16 * 1024 * 1024
+
+
 @dataclass
 class _Job:
     job_id: str
@@ -32,6 +45,9 @@ class _Job:
     cancel_requested: bool = False
     result: dict[str, Any] | None = None
     error: str | None = None
+    status_label: str = "Understanding request"
+    attachment_ids: tuple[str, ...] = ()
+
 
 
 class WebAppService:
@@ -437,6 +453,9 @@ class WebAppService:
                 deleted = self.conversations.delete(conversation_id)
                 self._json(request, 200 if deleted else 404, {"deleted": deleted})
                 return
+            if len(segments) >= 2 and segments[1] == "attachments":
+                self._attachment_route(request, conversation_id, segments[2:])
+                return
             if len(segments) != 2 or request.command != "POST":
                 self._json(request, 404, {"error": "not found"})
                 return
@@ -457,8 +476,78 @@ class WebAppService:
                 self._json(request, 404, {"error": "not found"})
                 return
             self._json(request, 200, asdict(document))
-        except (OSError, ValueError, FileNotFoundError) as error:
-            self._json(request, 400, {"error": str(error)[:300]})
+        except (OSError, ValueError, FileNotFoundError, KeyError) as error:
+            self._json(request, 400, {"error": self._user_error(error)})
+
+
+    def _attachment_route(
+        self,
+        request: BaseHTTPRequestHandler,
+        conversation_id: str,
+        segments: list[str],
+    ) -> None:
+        store = self._attachment_store()
+        if store is None:
+            self._json(request, 404, {"error": "Attachments are unavailable right now."})
+            return
+        self.conversations.load(conversation_id)
+        if not segments and request.command == "GET":
+            items = []
+            for record in store.list(conversation_id):
+                items.append({
+                    "attachment_id": record.attachment_id,
+                    "original_name": record.original_name,
+                    "content_type": record.content_type,
+                    "size_bytes": record.size_bytes,
+                    "created_at": record.created_at,
+                })
+            self._json(request, 200, items)
+            return
+        if not segments and request.command == "POST":
+            payload = self._read_json(request, max_bytes=int(_UPLOAD_MAX_BYTES * 1.4) + 4096)
+            name = str(payload.get("filename") or payload.get("original_name") or "attachment").strip()
+            content_type = str(payload.get("content_type") or "application/octet-stream")
+            encoded = str(payload.get("data") or payload.get("content_base64") or "")
+            try:
+                raw = base64.b64decode(encoded, validate=True)
+            except Exception as error:
+                raise ValueError("Attachment data must be valid base64.") from error
+            if len(raw) > _UPLOAD_MAX_BYTES:
+                raise ValueError("That file is too large to attach here (16 MB limit).")
+            record = store.import_bytes(
+                raw,
+                original_name=name,
+                conversation_id=conversation_id,
+                content_type=content_type,
+            )
+            self._json(request, 201, {
+                "attachment_id": record.attachment_id,
+                "original_name": record.original_name,
+                "content_type": record.content_type,
+                "size_bytes": record.size_bytes,
+                "created_at": record.created_at,
+            })
+            return
+        if len(segments) == 1 and request.command == "DELETE":
+            attachment_id = segments[0]
+            try:
+                record = store.get(attachment_id)
+            except KeyError:
+                self._json(request, 404, {"error": "Attachment not found."})
+                return
+            if record.conversation_id != conversation_id:
+                self._json(request, 403, {"error": "That attachment belongs to another chat."})
+                return
+            deleted = store.delete(attachment_id)
+            self._json(request, 200 if deleted else 404, {"deleted": deleted})
+            return
+        self._json(request, 404, {"error": "not found"})
+
+    def _attachment_store(self) -> Any | None:
+        services = self.platform_services
+        if services is None:
+            return None
+        return getattr(services, "attachments", None)
 
     def _job_route(self, request: BaseHTTPRequestHandler, segments: list[str]) -> None:
         if not segments and request.command == "POST":
@@ -474,10 +563,15 @@ class WebAppService:
                     conversation_id = self.conversations.create().conversation_id
                 raw_workspace = payload.get("workspace")
                 workspace = None if raw_workspace is None else str(raw_workspace).strip() or None
-            except (OSError, ValueError, FileNotFoundError) as error:
-                self._json(request, 400, {"error": str(error)[:300]})
+                attachment_ids = self._validated_attachment_ids(
+                    conversation_id, payload.get("attachment_ids") or ()
+                )
+            except (OSError, ValueError, FileNotFoundError, KeyError) as error:
+                self._json(request, 400, {"error": self._user_error(error)})
                 return
-            self._create_job(request, text, workspace, conversation_id)
+            self._create_job(
+                request, text, workspace, conversation_id, attachment_ids=attachment_ids
+            )
             return
         if len(segments) == 1 and request.command == "GET":
             job = self._jobs.get(segments[0])
@@ -491,16 +585,45 @@ class WebAppService:
             return
         self._json(request, 404, {"error": "not found"})
 
+    def _validated_attachment_ids(
+        self, conversation_id: str, raw_ids: Any
+    ) -> tuple[str, ...]:
+        if raw_ids in (None, "", []):
+            return ()
+        if not isinstance(raw_ids, (list, tuple)):
+            raise ValueError("attachment_ids must be a list.")
+        store = self._attachment_store()
+        cleaned: list[str] = []
+        for item in raw_ids:
+            attachment_id = str(item).strip()
+            if not attachment_id:
+                continue
+            if store is None:
+                raise ValueError("Attachments are unavailable right now.")
+            record = store.get(attachment_id)
+            if record.conversation_id != conversation_id:
+                raise ValueError("One or more attachments do not belong to this chat.")
+            cleaned.append(attachment_id)
+        return tuple(cleaned)
+
     def _create_job(
         self, request: BaseHTTPRequestHandler, text: str,
         workspace: str | None, conversation_id: str,
+        *, attachment_ids: tuple[str, ...] = (),
     ) -> None:
         with self._lock:
             active = self._jobs.get(self._active_job_id or "")
             if active is not None and active.status in {"queued", "running", "cancelling"}:
                 self._json(request, 409, {"error": "ChatMPD is busy with another job."})
                 return
-            job = _Job(uuid4().hex, text, workspace, conversation_id)
+            job = _Job(
+                uuid4().hex,
+                text,
+                workspace,
+                conversation_id,
+                status_label=_STATUS_LABELS["queued"],
+                attachment_ids=attachment_ids,
+            )
             self._jobs[job.job_id] = job
             self._active_job_id = job.job_id
             self._worker = Thread(target=self._run_job, args=(job.job_id,), name="ChatMPD web job", daemon=True)
@@ -512,33 +635,85 @@ class WebAppService:
             job = self._jobs[job_id]
             if job.cancel_requested:
                 job.status = "cancelled"
+                job.status_label = _STATUS_LABELS["cancelled"]
                 self._active_job_id = None
                 return
             job.status = "running"
+            job.status_label = _STATUS_LABELS["running"]
         try:
             loader = getattr(self.orchestrator.assistant, "load_conversation", None)
             if callable(loader):
                 loader(job.conversation_id)
-            result = self.orchestrator.command(job.text, workspace=job.workspace)
+            command_text = self._command_text_with_attachments(job)
+            result = self.orchestrator.command(command_text, workspace=job.workspace)
             with self._lock:
                 if job.cancel_requested:
                     job.status = "cancelled"
+                    job.status_label = _STATUS_LABELS["cancelled"]
                     return
             self._persist_result(job, result)
             with self._lock:
                 job.result = result.as_dict()
-                job.status = "completed"
+                details = result.details if isinstance(result.details, dict) else {}
+                if str(details.get("status") or "") == "needs_context":
+                    job.status = "needs_context"
+                    job.status_label = str(
+                        details.get("status_label") or _STATUS_LABELS["needs_context"]
+                    )
+                else:
+                    job.status = "completed"
+                    job.status_label = str(
+                        details.get("status_label") or _STATUS_LABELS["completed"]
+                    )
         except Exception as error:
             with self._lock:
                 if job.cancel_requested:
                     job.status = "cancelled"
+                    job.status_label = _STATUS_LABELS["cancelled"]
                 else:
                     job.status = "failed"
-                    job.error = f"{type(error).__name__}: {error}"[:500]
+                    job.status_label = _STATUS_LABELS["failed"]
+                    job.error = self._user_error(error)
         finally:
             with self._lock:
                 if self._active_job_id == job_id:
                     self._active_job_id = None
+
+    def _command_text_with_attachments(self, job: _Job) -> str:
+        if not job.attachment_ids:
+            return job.text
+        store = self._attachment_store()
+        if store is None:
+            return job.text
+        notes: list[str] = []
+        for attachment_id in job.attachment_ids:
+            try:
+                record = store.get(attachment_id)
+            except KeyError:
+                continue
+            if record.conversation_id != job.conversation_id:
+                continue
+            snippet = ""
+            if record.content_type.startswith("text/") or record.original_name.lower().endswith(
+                (".txt", ".md", ".py", ".json", ".csv", ".log")
+            ):
+                try:
+                    raw = record.path.read_bytes()[:8_000]
+                    snippet = raw.decode("utf-8", errors="replace").strip()
+                except OSError:
+                    snippet = ""
+            if snippet:
+                notes.append(
+                    f"[Attachment {record.original_name}]\n{snippet[:4000]}"
+                )
+            else:
+                notes.append(
+                    f"[Attachment {record.original_name} ({record.content_type}, {record.size_bytes} bytes)]"
+                )
+        if not notes:
+            return job.text
+        return job.text + "\n\n" + "\n\n".join(notes)
+
 
     def _persist_result(self, job: _Job, result: CommandResult) -> None:
         document = self.conversations.load(job.conversation_id)
@@ -557,11 +732,12 @@ class WebAppService:
             if job is None:
                 self._json(request, 404, {"error": "job not found"})
                 return
-            if job.status in {"completed", "failed", "cancelled"}:
+            if job.status in {"completed", "failed", "cancelled", "needs_context"}:
                 self._json(request, 200, self._public_job(job))
                 return
             job.cancel_requested = True
             job.status = "cancelled" if job.status == "queued" else "cancelling"
+            job.status_label = _STATUS_LABELS.get(job.status, "Stopping safely")
         try:
             decision = self.orchestrator.router.classify(job.text)
             if getattr(decision, "capability", "") == "chat":
@@ -682,13 +858,24 @@ class WebAppService:
         payload: dict[str, Any] = {
             "job_id": job.job_id,
             "status": job.status,
+            "status_label": job.status_label or _STATUS_LABELS.get(job.status, "Working locally"),
             "conversation_id": job.conversation_id,
         }
-        if job.result is not None and job.status == "completed":
+        if job.result is not None and job.status in {"completed", "needs_context"}:
             payload["result"] = job.result
         if job.error and job.status == "failed":
             payload["error"] = job.error
         return payload
+
+    @staticmethod
+    def _user_error(error: BaseException) -> str:
+        message = " ".join(str(error).split()).strip()
+        if not message:
+            message = "Something went wrong while ChatMPD was working."
+        # Strip exception class prefixes from default formatting.
+        if ": " in message and message.split(": ", 1)[0].endswith("Error"):
+            message = message.split(": ", 1)[1]
+        return message[:400]
 
     @staticmethod
     def _is_loopback(host: str) -> bool:
@@ -697,12 +884,15 @@ class WebAppService:
         except ValueError:
             return False
 
-    def _read_json(self, request: BaseHTTPRequestHandler) -> dict[str, Any]:
+    def _read_json(
+        self, request: BaseHTTPRequestHandler, *, max_bytes: int | None = None
+    ) -> dict[str, Any]:
         try:
             length = int(request.headers.get("Content-Length", "0"))
         except ValueError as error:
             raise ValueError("Invalid Content-Length.") from error
-        if length < 0 or length > self.max_body_bytes:
+        limit = self.max_body_bytes if max_bytes is None else int(max_bytes)
+        if length < 0 or length > limit:
             raise ValueError("Request body is too large.")
         raw = request.rfile.read(length)
         try:
