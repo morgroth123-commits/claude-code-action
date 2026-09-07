@@ -7,6 +7,7 @@ from pathlib import Path
 
 from chatmpd.assistant import ConversationStore, DesktopAssistant
 from chatmpd.conversation_library import ConversationLibrary
+from chatmpd.platform_db import PlatformDatabase
 
 
 class _Runtime:
@@ -114,3 +115,64 @@ class ConversationLibraryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConversationMetadataDatabaseTest(unittest.TestCase):
+    def test_existing_json_is_backfilled_and_sidebar_listing_uses_sqlite_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "conversations"
+            root.mkdir()
+            path = root / "legacy.json"
+            path.write_text(json.dumps({
+                "conversation_id": "legacy",
+                "title": "Legacy chat",
+                "pinned": True,
+                "workspace": "C:/project",
+                "created_at": "2026-09-01T00:00:00+00:00",
+                "updated_at": "2026-09-02T00:00:00+00:00",
+                "messages": [{"role": "user", "content": "find the old answer"}],
+            }), encoding="utf-8")
+            database = PlatformDatabase(Path(directory) / "chatmpd.db")
+            library = ConversationLibrary(root, database=database)
+
+            path.write_text("{broken json", encoding="utf-8")
+            summaries = library.list()
+
+            self.assertEqual(summaries[0].conversation_id, "legacy")
+            self.assertEqual(summaries[0].workspace, "C:/project")
+
+    def test_search_uses_conversation_fts_after_save(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "conversations"
+            database = PlatformDatabase(Path(directory) / "chatmpd.db")
+            library = ConversationLibrary(root, database=database)
+            document = library.create([
+                {"role": "user", "content": "diagnose the impossible audio crackle"},
+                {"role": "assistant", "content": "I found the receiver issue."},
+            ])
+
+            library._path(document.conversation_id).write_text("{broken", encoding="utf-8")
+            matches = library.search("receiver")
+
+            self.assertEqual(matches[0].conversation_id, document.conversation_id)
+
+    def test_assistant_chat_save_keeps_sqlite_search_metadata_current(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "conversations"
+            library = ConversationLibrary(root)
+            document = library.create([
+                {"role": "user", "content": "Initial request"},
+                {"role": "assistant", "content": "Initial answer"},
+            ])
+            assistant = DesktopAssistant(
+                runtime=_Runtime(),
+                provider_factory=lambda endpoint: _Provider(),
+                conversation_store=ConversationStore(root),
+            )
+            assistant.load_conversation(document.conversation_id)
+            assistant.chat("Continue with receiver diagnostics")
+
+            library._path(document.conversation_id).write_text("{broken", encoding="utf-8")
+            matches = library.search("continued")
+
+            self.assertEqual(matches[0].conversation_id, document.conversation_id)

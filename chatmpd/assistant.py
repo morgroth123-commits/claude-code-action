@@ -79,6 +79,7 @@ class ConversationStore:
             os.replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)
+        ConversationLibrary(self.root).sync(conversation_id)
         return destination
 
 
