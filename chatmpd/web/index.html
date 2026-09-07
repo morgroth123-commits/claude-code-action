@@ -36,7 +36,7 @@
     </div>
     <nav id="conversation-list" class="conversation-list" aria-label="Recent conversations"></nav>
     <div class="sidebar-bottom">
-      <button id="control-center" class="sidebar-action" type="button"><span>⚙</span><span>Control Center</span></button>
+      <button id="control-center" class="sidebar-action" type="button"><span>⚙</span><span>Settings</span></button>
       <button id="mobile-access" class="sidebar-action" type="button"><span>▣</span><span>Connect phone</span></button>
       <button id="theme-button" class="sidebar-action" type="button"><span>◐</span><span>Appearance</span></button>
       <div class="runtime-row" title="Local runtime status">
@@ -61,7 +61,13 @@
       <section id="welcome" class="welcome-state">
         <img src="/chatmpd-192.png" alt="" class="welcome-icon">
         <h1>How can I help?</h1>
-        <p>Ask anything, work on a project, inspect this PC, manage ESO or Vortex, or create local media.</p>
+        <p>Describe what you want in plain language. ChatMPD figures out the rest on this PC.</p>
+        <div id="welcome-suggestions" class="welcome-suggestions" role="group" aria-label="Example requests">
+          <button type="button" class="suggestion-button" data-suggestion="Help me with this PC">Help me with this PC</button>
+          <button type="button" class="suggestion-button" data-suggestion="Work on a project">Work on a project</button>
+          <button type="button" class="suggestion-button" data-suggestion="Create an image of a quiet forest path">Create an image</button>
+          <button type="button" class="suggestion-button" data-suggestion="Explain something simply">Explain something</button>
+        </div>
       </section>
       <div id="messages" class="messages"></div>
       <div id="working" class="working-row" hidden role="status" aria-live="polite">
@@ -70,10 +76,13 @@
     </main>
     <footer class="composer-region">
       <form id="composer" class="composer-shell" autocomplete="off">
+        <div id="attachment-list" class="attachment-list" aria-live="polite"></div>
         <textarea id="prompt" rows="1" placeholder="Message ChatMPD" aria-label="Message ChatMPD"></textarea>
         <div class="composer-tools">
           <div class="composer-left">
-            <button id="project-button" class="round-button" type="button" aria-label="Choose project folder">＋</button>
+            <button id="attachment-button" class="round-button" type="button" aria-label="Attach files" title="Attach files">＋</button>
+            <input id="attachment-input" type="file" multiple hidden>
+            <button id="project-button" class="round-button" type="button" aria-label="Choose project folder" title="Choose project folder">📁</button>
             <span id="project-label" class="composer-hint">Local on this PC</span>
           </div>
           <button id="send" class="send-button" type="submit" aria-label="Send message">↑</button>
@@ -120,23 +129,28 @@
 <dialog id="control-dialog" class="modal control-modal" aria-labelledby="control-title">
   <form method="dialog" class="modal-card control-card">
     <div class="modal-heading">
-      <div><h2 id="control-title">Control Center</h2><p>Memory, models, skills, tools, automation, recovery, and sharing.</p></div>
-      <button class="icon-button" value="cancel" aria-label="Close">×</button>
+      <div><h2 id="control-title">Settings</h2><p>Personalize everyday ChatMPD behavior. Technical controls stay optional.</p></div>
+      <button class="icon-button" value="cancel" aria-label="Close">?</button>
     </div>
     <div class="control-layout">
-      <nav class="control-nav" aria-label="Control Center sections">
+      <nav class="control-nav" aria-label="Settings sections">
         <button type="button" data-control-section="overview">Overview</button>
         <button type="button" data-control-section="memory">Memory</button>
-        <button type="button" data-control-section="knowledge">Knowledge</button>
-        <button type="button" data-control-section="capabilities">Skills &amp; Tools</button>
-        <button type="button" data-control-section="models">Models</button>
-        <button type="button" data-control-section="performance">Performance</button>
-        <button type="button" data-control-section="workflows">Workflows</button>
-        <button type="button" data-control-section="automations">Automations</button>
         <button type="button" data-control-section="recovery">Recovery</button>
-        <button type="button" data-control-section="prompts">Prompt Guide</button>
-        <button type="button" data-control-section="diagnostics">Diagnostics</button>
-        <button type="button" data-control-section="sharing">Sharing</button>
+        <details id="advanced-settings" class="advanced-settings">
+          <summary>Advanced</summary>
+          <div class="advanced-settings-list">
+            <button type="button" data-control-section="knowledge">Knowledge</button>
+            <button type="button" data-control-section="capabilities">Skills &amp; Tools</button>
+            <button type="button" data-control-section="models">Models</button>
+            <button type="button" data-control-section="performance">Performance</button>
+            <button type="button" data-control-section="workflows">Workflows</button>
+            <button type="button" data-control-section="automations">Automations</button>
+            <button type="button" data-control-section="prompts">Prompt Guide</button>
+            <button type="button" data-control-section="diagnostics">Diagnostics</button>
+            <button type="button" data-control-section="sharing">Sharing</button>
+          </div>
+        </details>
       </nav>
       <section class="control-main" aria-live="polite">
         <div class="control-toolbar">

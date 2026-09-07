@@ -9,6 +9,9 @@ const state = {
   workspace: "",
   mobile: null,
   clientMode: "desktop",
+  pendingAttachments: [],
+  pendingAttachmentIds: [],
+  lastSubmittedText: "",
 };
 
 async function api(path, options = {}) {
@@ -123,6 +126,7 @@ function renderWorkspace(workspace) {
 async function createConversation() {
   const document = await api("/api/conversations", { method: "POST", body: "{}" });
   state.activeConversation = document.conversation_id;
+  clearPendingAttachmentSelection();
   $("conversation-title").textContent = document.title;
   renderWorkspace(document.workspace);
   renderMessages(document.messages || []);
@@ -135,6 +139,7 @@ async function createConversation() {
 async function openConversation(conversationId) {
   const document = await api(`/api/conversations/${encodeURIComponent(conversationId)}`);
   state.activeConversation = document.conversation_id;
+  clearPendingAttachmentSelection();
   $("conversation-title").textContent = document.title;
   renderWorkspace(document.workspace);
   renderMessages(document.messages || []);
@@ -297,9 +302,160 @@ function autoGrowComposer() {
   prompt.style.height = `${Math.min(prompt.scrollHeight, 190)}px`;
 }
 
+function renderAttachmentChips() {
+  const list = $("attachment-list");
+  list.replaceChildren();
+  for (const record of state.pendingAttachments) {
+    const chip = document.createElement("span");
+    chip.className = "attachment-chip";
+    const name = document.createElement("span");
+    name.textContent = record.original_name || "Attachment";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove ${record.original_name || "attachment"}`);
+    remove.textContent = "?";
+    remove.addEventListener("click", () => removeAttachment(record.attachment_id));
+    chip.append(name, remove);
+    list.append(chip);
+  }
+}
+
+async function fileToBase64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const parts = [];
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    parts.push(String.fromCharCode(...bytes.subarray(index, index + 0x8000)));
+  }
+  return btoa(parts.join(""));
+}
+
+async function uploadAttachments(files) {
+  const selected = Array.from(files || []);
+  if (!selected.length) return;
+  if (!state.activeConversation) await createConversation();
+  if (state.clientMode === "mobile") {
+    $("capability-label").textContent = "Attach files from the desktop for now";
+    return;
+  }
+  for (const file of selected) {
+    const data = await fileToBase64(file);
+    const record = await api(`/api/conversations/${encodeURIComponent(state.activeConversation)}/attachments`, {
+      method: "POST",
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: file.type || "application/octet-stream",
+        data,
+      }),
+    });
+    state.pendingAttachments.push(record);
+    state.pendingAttachmentIds.push(record.attachment_id);
+  }
+  renderAttachmentChips();
+}
+
+async function removeAttachment(attachmentId) {
+  const id = String(attachmentId || "").trim();
+  if (!id || !state.activeConversation) return;
+  await api(`/api/conversations/${encodeURIComponent(state.activeConversation)}/attachments/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  state.pendingAttachments = state.pendingAttachments.filter((item) => item.attachment_id !== id);
+  state.pendingAttachmentIds = state.pendingAttachmentIds.filter((item) => item !== id);
+  renderAttachmentChips();
+}
+
+function clearPendingAttachmentSelection() {
+  state.pendingAttachments = [];
+  state.pendingAttachmentIds = [];
+  renderAttachmentChips();
+}
+
+function appendInlineAction(node) {
+  if (!node) return;
+  const last = $("messages").lastElementChild;
+  const bubble = last && last.querySelector(".message-bubble");
+  if (bubble) bubble.append(node);
+}
+
+function renderSuggestedAction(details) {
+  const action = String(details?.suggested_action || "").trim();
+  if (!action) return null;
+  const card = document.createElement("div");
+  card.className = "inline-action-card";
+  const message = document.createElement("span");
+  message.textContent = details?.needs_context?.message || "I need one more thing to continue.";
+  const button = document.createElement("button");
+  button.type = "button";
+  if (action === "choose_workspace") {
+    button.textContent = "Choose project";
+    button.addEventListener("click", async () => {
+      await chooseWorkspace();
+      if (state.workspace && state.lastSubmittedText) await retryLastRequest();
+    });
+  } else {
+    button.textContent = "Continue";
+    button.disabled = true;
+  }
+  card.append(message, button);
+  return card;
+}
+
+async function submitConfirmation(actionToken) {
+  const token = String(actionToken || "").trim();
+  if (!token) return;
+  const result = await api("/api/confirmations", {
+    method: "POST",
+    body: JSON.stringify({ action_token: token }),
+  });
+  if (result?.message) appendMessage("assistant", result.message);
+  renderResult(result);
+}
+
+function renderConfirmation(details) {
+  const confirmation = details?.confirmation;
+  const token = String(confirmation?.action_token || "").trim();
+  if (!confirmation || !token) return null;
+  const card = document.createElement("div");
+  card.className = "inline-action-card confirmation-card";
+  const copy = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = confirmation.title || "Confirm this action";
+  const consequence = document.createElement("p");
+  consequence.textContent = confirmation.consequence || "ChatMPD needs your approval before continuing.";
+  copy.append(title, consequence);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = confirmation.confirm_label || "Allow";
+  button.addEventListener("click", () => submitConfirmation(token));
+  card.append(copy, button);
+  return card;
+}
+
+async function retryLastRequest() {
+  if (state.activeJob || !state.lastSubmittedText) return;
+  $("prompt").value = state.lastSubmittedText;
+  autoGrowComposer();
+  await submitPrompt();
+}
+
+function renderRetryAction() {
+  if (!state.lastSubmittedText) return null;
+  const card = document.createElement("div");
+  card.className = "inline-action-card";
+  const label = document.createElement("span");
+  label.textContent = "You can try that request again.";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Retry";
+  button.addEventListener("click", retryLastRequest);
+  card.append(label, button);
+  return card;
+}
+
 async function submitMobileCommand(text) {
   const payload = { text, conversation_id: state.activeConversation };
   if (state.workspace) payload.workspace = state.workspace;
+  if (state.pendingAttachmentIds.length) payload.attachment_ids = [...state.pendingAttachmentIds];
   state.activeJob = "mobile-request";
   setBusy(true, "Working locally");
   try {
@@ -323,6 +479,7 @@ async function submitPrompt(event) {
   if (state.activeJob) return;
   const text = $("prompt").value.trim();
   if (!text) return;
+  state.lastSubmittedText = text;
   if (!state.activeConversation) await createConversation();
 
   appendMessage("user", text);
@@ -336,6 +493,7 @@ async function submitPrompt(event) {
   try {
     const payload = { text, conversation_id: state.activeConversation };
     if (state.workspace) payload.workspace = state.workspace;
+    if (state.pendingAttachmentIds.length) payload.attachment_ids = [...state.pendingAttachmentIds];
     const accepted = await api("/api/jobs", {
       method: "POST", body: JSON.stringify(payload),
     });
@@ -352,6 +510,7 @@ async function pollJob(jobId) {
   try {
     const job = await api(`/api/jobs/${jobId}`);
     if (["queued", "running", "cancelling"].includes(job.status)) {
+      setBusy(true, job.status_label || "Working on it");
       setTimeout(() => pollJob(jobId), 500);
       return;
     }
@@ -364,12 +523,14 @@ async function pollJob(jobId) {
       appendMessage("assistant", "Stopped. No success was reported for the cancelled task.");
     } else {
       appendMessage("assistant", `I couldn't complete that task: ${job.error || "Unknown error"}`);
+      appendInlineAction(renderRetryAction());
     }
     await loadConversations();
   } catch (error) {
     state.activeJob = null;
     setBusy(false, "Connection error");
     appendMessage("assistant", `The local UI lost the job status: ${error.message}`);
+    appendInlineAction(renderRetryAction());
   }
 }
 
@@ -395,8 +556,11 @@ function addDetailRow(container, labelText, valueText) {
 }
 
 function renderResult(result) {
-  if (!result || !result.details || !Object.keys(result.details).length) return;
-  const details = result.details;
+  if (!result) return;
+  const details = result.details || {};
+  appendInlineAction(renderSuggestedAction(details));
+  appendInlineAction(renderConfirmation(details));
+  if (!Object.keys(details).length) return;
   const wrapper = document.createElement("details");
   wrapper.className = "details-toggle";
   const summary = document.createElement("summary");
@@ -988,6 +1152,28 @@ function bindEvents() {
       event.preventDefault();
       submitPrompt(event);
     }
+  });
+  $("attachment-button").addEventListener("click", () => $("attachment-input").click());
+  $("attachment-input").addEventListener("change", async (event) => {
+    await uploadAttachments(event.target.files);
+    event.target.value = "";
+  });
+  $("composer").addEventListener("dragover", (event) => {
+    event.preventDefault();
+    $("composer").classList.add("drag-active");
+  });
+  $("composer").addEventListener("dragleave", () => $("composer").classList.remove("drag-active"));
+  $("composer").addEventListener("drop", async (event) => {
+    event.preventDefault();
+    $("composer").classList.remove("drag-active");
+    await uploadAttachments(event.dataTransfer?.files || []);
+  });
+  document.querySelectorAll("[data-suggestion]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      $("prompt").value = button.dataset.suggestion || button.textContent || "";
+      autoGrowComposer();
+      await submitPrompt();
+    });
   });
   $("conversation-search").addEventListener("input", (event) => loadConversations(event.target.value.trim()));
   $("sidebar-toggle").addEventListener("click", () => showSidebar(!document.body.classList.contains("sidebar-open")));
